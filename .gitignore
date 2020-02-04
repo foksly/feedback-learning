@@ -1,2 +1,4 @@
 /__pycache__
 .DS_Store
+/mnist-classifier/.ipynb_checkpoints
+/mnist-classifier/__pycache__
