@@ -6,7 +6,6 @@ Maze::Maze(int n_rows, int n_cols, State start, State end)
     : n_rows_(n_rows), n_cols_(n_cols), maze_(n_rows * n_cols, kGrid), start_(start), end_(end) {
     maze_[start] = kStart;
     maze_[end] = kEnd;
-    // assert kStart != kend
 
     value_to_reward[kGrid] = -1;
     value_to_reward[kStart] = -1;
@@ -23,13 +22,15 @@ Maze::Maze(int num_rows, int num_cols, std::pair<int, int> start, std::pair<int,
 Maze::Maze(int size, std::pair<int, int> start, std::pair<int, int> end)
     : Maze(size, size, start, end) {}
 
-char Maze::operator[](State state) { return maze_[state]; };
+char Maze::operator[](State state) const { return maze_[state]; }
+
+char &Maze::operator[](State state) { return maze_[state]; }
 
 size_t Maze::Size() const { return maze_.size(); }
 
-int Maze::NumberOfRows() const { return n_rows_; };
+int Maze::NumberOfRows() const { return n_rows_; }
 
-int Maze::NumberOfCols() const { return n_cols_; };
+int Maze::NumberOfCols() const { return n_cols_; }
 
 std::vector<char> Maze::GetValidForStepValues() const { return {kGrid, kKey, kStart, kEnd}; }
 
@@ -39,8 +40,16 @@ State Maze::GetStartState() const { return start_; }
 
 State Maze::GetEndState() const { return end_; }
 
+State Maze::ConvertCoordinateToState(std::pair<int, int> coordinate) const {
+    return n_cols_ * coordinate.first + coordinate.second;
+};
+
+std::pair<int, int> Maze::ConvertStateToCoordinate(State state) const {
+    return {state / n_cols_, state % n_cols_};
+}
+
 Environment::Environment(Maze maze)
-    : maze_(maze), current_state_(maze.GetStartState()), random_generator(151343) {}
+    : maze_(maze), current_state_(maze.GetStartState()), random_generator(time(0)) {}
 
 Environment::Environment() : Environment({5, 0, 24}) {}
 
@@ -76,6 +85,8 @@ Observation Environment::Step(Action action) {
 }
 
 int Environment::NumberOfStates() { return static_cast<int>(maze_.Size()); }
+
+Maze Environment::GetMaze() { return maze_; }
 
 State Environment::SampleState() {
     std::uniform_int_distribution<int> dist(0, static_cast<int>(maze_.Size()) - 1);

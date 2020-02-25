@@ -32,25 +32,30 @@ void QTable::Reset() {
     }
 }
 
-void QTable::Render(int n_cols) {
+void QTable::Render(int n_cols, const Maze& maze) {
     std::vector<char> direction = {'R', 'L', 'U', 'D'};
     for (int index = 0; index < static_cast<int>(qtable_.size()); ++index) {
         if (index % n_cols == 0) {
             std::cout << "\n";
         }
-        std::cout << direction[static_cast<int>(GetBestAction(index))] << " ";
+        if (maze[index] == maze.kWall) {
+            std::cout << "W"
+                      << " ";
+        } else {
+            std::cout << direction[static_cast<int>(GetBestAction(index))] << " ";
+        }
     }
     std::cout << "\n";
 }
 
 void Epsilon::Update(int episode) {
-        value = min_epsilon + (max_epsilon - min_epsilon) * std::exp(-decay_rate * episode);
-    }
+    value = min_epsilon + (max_epsilon - min_epsilon) * std::exp(-decay_rate * episode);
+}
 
 QTable Train(int n_episodes, int max_steps, Epsilon epsilon) {
     Environment env;
     QTable qtable(env);
-    std::mt19937 random_generator(1531413);
+    std::mt19937 random_generator(time(0));
     std::uniform_real_distribution<> dist(0, 1);
 
     for (int episode = 0; episode < n_episodes; ++episode) {
@@ -60,6 +65,8 @@ QTable Train(int n_episodes, int max_steps, Epsilon epsilon) {
         bool is_done = false;
 
         while (n_steps < max_steps && !is_done) {
+            ++n_steps;
+
             Action action = qtable.GetBestAction(state);
             if (dist(random_generator) < epsilon.value) {
                 action = env.SampleAction();
@@ -70,7 +77,7 @@ QTable Train(int n_episodes, int max_steps, Epsilon epsilon) {
             state = observation.state;
         }
         epsilon.Update(episode);
-        qtable.Render(env.maze_.NumberOfCols());
+        qtable.Render(env.GetMaze().NumberOfCols(), env.GetMaze());
     }
 
     return qtable;

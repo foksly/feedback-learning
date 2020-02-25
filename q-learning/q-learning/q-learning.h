@@ -18,7 +18,7 @@ class QTable {
 
     void Reset();
 
-    void Render(int n_cols);
+    void Render(int n_cols, const Maze& maze);
 
    private:
     std::vector<std::vector<double>> qtable_;

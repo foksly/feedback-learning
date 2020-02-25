@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <iostream>
 #include <random>
 #include <unordered_map>
@@ -22,12 +23,14 @@ class Maze {
 
     Maze(int size, std::pair<int, int> start, std::pair<int, int> end);
 
-    char operator[](State state);
+    char operator[](State state) const;
+
+    char& operator[](State state);
 
     size_t Size() const;
-    
+
     int NumberOfRows() const;
-    
+
     int NumberOfCols() const;
 
     std::vector<char> GetValidForStepValues() const;
@@ -37,6 +40,10 @@ class Maze {
     State GetStartState() const;
 
     State GetEndState() const;
+
+    State ConvertCoordinateToState(std::pair<int, int> coordinate) const;
+
+    std::pair<int, int> ConvertStateToCoordinate(State state) const;
 
     const char kGrid = 'G';
     const char kStart = 'S';
@@ -84,15 +91,17 @@ class Environment {
 
     Action SampleAction();
 
+    State ConvertCoordinateToState(std::pair<int, int> coordinate);
+
+    std::pair<int, int> ConvertStateToCoordinate(State state);
+
+    Maze GetMaze();
+
     Maze maze_;
 
    private:
     State current_state_;
     std::mt19937 random_generator;
-
-    State ConvertCoordinateToState(std::pair<int, int> coordinate);
-
-    std::pair<int, int> ConvertStateToCoordinate(State state);
 
     bool IsValidForStep(State state, std::vector<char> valid_values);
 
