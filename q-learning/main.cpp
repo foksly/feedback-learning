@@ -1,6 +1,3 @@
-#include <SFML/Graphics.hpp>
-#include "environments/grid_world.h"
-#include "q-learning/q-learning.h"
 #include "vis/q-learning_vis.h"
 
 int main() {
