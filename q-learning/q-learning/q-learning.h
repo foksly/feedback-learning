@@ -16,7 +16,7 @@ class QTable {
     virtual void UpdateQValue(State state, SimpleEnv::Action action, State new_state,
                               Reward reward);
 
-    virtual SimpleEnv::Action GetBestAction(State state);
+    SimpleEnv::Action GetBestAction(State state);
 
     virtual bool AllQValuesEqual(State state);
 
@@ -31,20 +31,39 @@ class QTable {
     double discounting_rate_;
 };
 
-/*
-class SwitchQTable : public QTable {
+struct SwitchEnvState {
+    State state;
+    int n_switches;
+};
+
+class SwitchQTable {
    public:
-    SwitchQTable(const SimpleEnv& env, int max_switches);
+    explicit SwitchQTable(const SwitchEnv& env);
 
-    virtual void UpdateQValue(State state, Action action, State new_state, Reward reward);
+    void UpdateQValue(SwitchEnvState state, SwitchEnv::Action action, SwitchEnvState new_state,
+                      Reward reward);
 
-    virtual Action GetBestAction(State state);
+    SwitchEnv::Action GetBestAction(SwitchEnvState state);
 
-   private:
+    void SetLearningRate(double learning_rate);
+
+    void SetDiscountingRate(double discounting_rate);
+
+    bool AllQValuesEqual(SwitchEnvState state);
+
+    void Render(int n_cols, const Maze& maze);
+
+   protected:
+    std::vector<std::vector<std::vector<double>>> qtable_;
+
+    double learning_rate_;
+    double discounting_rate_;
+
     int n_switches_;
     int max_switches_;
+    std::vector<State> key_order_;
 };
-*/
+
 class Epsilon {
    public:
     explicit Epsilon(double value_) : value(value_) {}
@@ -67,3 +86,6 @@ class EpsilonWithDecay : public Epsilon {
 QTable Train(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon);
 
 QTable TrainAutoSwitch1dState(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon);
+
+SwitchQTable TrainAutoSwitch2dState(int n_episodes, int max_steps,
+                                    std::shared_ptr<Epsilon> epsilon);

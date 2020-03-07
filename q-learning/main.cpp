@@ -11,7 +11,8 @@ int main() {
     auto eps = std::make_shared<EpsilonWithDecay>(0.5);
     // auto eps = std::make_shared<Epsilon>(0.1);
 
-    TrainAutoSwitch1dState(n_episodes, max_steps, eps);
+    // Train(n_episodes, max_steps, eps);
+    TrainAutoSwitch2dState(n_episodes, max_steps, eps);
     // TrainModelProblemN1(n_episodes, max_steps, eps);
     // VisualizeQLearning(grid_size, start, end, speed, n_episodes, max_steps, eps);
 

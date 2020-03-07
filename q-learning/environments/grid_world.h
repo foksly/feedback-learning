@@ -94,7 +94,7 @@ class SimpleEnv {
 
     virtual int NumberOfActions() const;
 
-    virtual Action SampleAction();
+    Action SampleAction();
 
     std::shared_ptr<Maze> maze_;
 
@@ -109,12 +109,34 @@ class SimpleEnv {
     virtual Reward GetRewardForAction(State state, Action action);
 };
 
-class SwitchEnv : protected SimpleEnv {
+class SwitchEnv : public SimpleEnv {
    public:
     enum class Action { Right, Left, Up, Down, Switch, Size = 5 };
 
+    SwitchEnv(const std::shared_ptr<Maze>& maze, std::vector<State> key_order);
+
+    virtual State Reset();
+
+    virtual void Render();
+
+    virtual Observation Step(Action action);
+
+    virtual int NumberOfActions() const;
+
+    Action SampleAction();
+
+    int GetNumberOfSwitches() const;
+
+    std::vector<State> GetKeyOrder() const;
+
+    const int max_switches_;
+
+    std::vector<bool> correct_switches_;
+
    protected:
-    virtual bool IsValidForStep(State state, std::vector<char> valid_values);
+    int n_swithches_;
+
+    std::vector<State> key_order_;
 
     virtual State GetNextState(State state, Action action);
 
