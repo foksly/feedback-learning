@@ -51,7 +51,7 @@ void DrawGrid(sf::RenderWindow* window, const Maze& maze) {
     }
 }
 
-void DrawCurrentState(sf::RenderWindow* window, Environment* env) {
+void DrawCurrentState(sf::RenderWindow* window, SimpleEnv* env) {
     auto state_position = env->maze_->ConvertStateToCoordinate(env->GetCurrentState());
     int thickness = 1;
     sf::RectangleShape rectangle = GetRect(kSquareSize - 2 * thickness,
@@ -71,7 +71,7 @@ void DrawCurrentState(sf::RenderWindow* window, Environment* env) {
 void VisualizeQLearning(std::pair<int, int> maze_size, State start, State end, int speed,
                         int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
     Maze maze = Maze(maze_size.first, maze_size.second, start, end);
-    Environment env(std::make_shared<Maze>(maze));
+    SimpleEnv env(std::make_shared<Maze>(maze));
 
     QTable qtable(env);
 
@@ -136,7 +136,7 @@ void VisualizeQLearning(std::pair<int, int> maze_size, State start, State end, i
                     window.display();
                     sf::sleep(sf::milliseconds(speed));
 
-                    Action action = qtable.GetBestAction(state);
+                    SimpleEnv::Action action = qtable.GetBestAction(state);
                     if (dist(random_generator) < epsilon->value) {
                         action = env.SampleAction();
                     }

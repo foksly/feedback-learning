@@ -48,17 +48,17 @@ std::pair<int, int> Maze::ConvertStateToCoordinate(State state) const {
 
 void Maze::ChangeRewardValue(char key, Reward reward) { value2reward[key] = reward; }
 
-Environment::Environment(const std::shared_ptr<Maze>& maze)
+SimpleEnv::SimpleEnv(const std::shared_ptr<Maze>& maze)
     : maze_(maze), current_state_(maze->GetStartState()), random_generator(time(0)) {}
 
-Environment::Environment() : Environment(std::make_shared<Maze>(5, 0, 24)) {}
+SimpleEnv::SimpleEnv() : SimpleEnv(std::make_shared<Maze>(5, 0, 24)) {}
 
-State Environment::Reset() {
+State SimpleEnv::Reset() {
     current_state_ = maze_->GetStartState();
     return current_state_;
 }
 
-void Environment::Render() {
+void SimpleEnv::Render() {
     for (int index = 0; index < static_cast<int>(maze_->Size()); ++index) {
         if (index % maze_->NumberOfRows() == 0) {
             std::cout << "\n";
@@ -72,7 +72,7 @@ void Environment::Render() {
     std::cout << "\n";
 }
 
-Observation Environment::Step(Action action) {
+Observation SimpleEnv::Step(Action action) {
     State next_state = GetNextState(current_state_, action);
     Reward reward = GetRewardForAction(current_state_, action);
     bool is_done = false;
@@ -83,23 +83,23 @@ Observation Environment::Step(Action action) {
     return {next_state, reward, is_done};
 }
 
-int Environment::NumberOfStates() const { return static_cast<int>(maze_->Size()); }
+int SimpleEnv::NumberOfStates() const { return static_cast<int>(maze_->Size()); }
 
-State Environment::SampleState() {
+State SimpleEnv::SampleState() {
     std::uniform_int_distribution<int> dist(0, static_cast<int>(maze_->Size()) - 1);
     return dist(random_generator);
 }
 
-int Environment::NumberOfActions() const { return static_cast<int>(Action::Size); }
+int SimpleEnv::NumberOfActions() const { return static_cast<int>(Action::Size); }
 
-Action Environment::SampleAction() {
+SimpleEnv::Action SimpleEnv::SampleAction() {
     std::uniform_int_distribution<int> dist(0, static_cast<int>(Action::Size) - 1);
     return static_cast<Action>(dist(random_generator));
 }
 
-State Environment::GetCurrentState() const { return current_state_; }
+State SimpleEnv::GetCurrentState() const { return current_state_; }
 
-bool Environment::IsValidForStep(State state, std::vector<char> valid_values) {
+bool SimpleEnv::IsValidForStep(State state, std::vector<char> valid_values) {
     bool is_valid = false;
     for (auto value : valid_values) {
         is_valid |= (*maze_)[state] == value;
@@ -107,7 +107,7 @@ bool Environment::IsValidForStep(State state, std::vector<char> valid_values) {
     return is_valid;
 }
 
-State Environment::GetNextState(State state, Action action) {
+State SimpleEnv::GetNextState(State state, Action action) {
     std::pair<int, int> state_coordinates = maze_->ConvertStateToCoordinate(state);
     if (action == Action::Right && state_coordinates.second < maze_->NumberOfCols() - 1) {
         State next_state = maze_->ConvertCoordinateToState(
@@ -140,7 +140,7 @@ State Environment::GetNextState(State state, Action action) {
     return state;
 }
 
-Reward Environment::GetRewardForAction(State state, Action action) {
+Reward SimpleEnv::GetRewardForAction(State state, Action action) {
     State next_state = GetNextState(state, action);
     return maze_->GetRewardInState(next_state);
 }

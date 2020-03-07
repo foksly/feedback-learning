@@ -5,17 +5,18 @@
 
 class QTable {
    public:
-    QTable(const Environment& env, double learning_rate, double discounting_rate);
+    QTable(const SimpleEnv& env, double learning_rate, double discounting_rate);
 
-    explicit QTable(const Environment& env);
+    explicit QTable(const SimpleEnv& env);
 
     virtual void SetLearningRate(double learning_rate);
 
     virtual void SetDiscountingRate(double discounting_rate);
 
-    virtual void UpdateQValue(State state, Action action, State new_state, Reward reward);
+    virtual void UpdateQValue(State state, SimpleEnv::Action action, State new_state,
+                              Reward reward);
 
-    virtual Action GetBestAction(State state);
+    virtual SimpleEnv::Action GetBestAction(State state);
 
     virtual bool AllQValuesEqual(State state);
 
@@ -33,7 +34,7 @@ class QTable {
 /*
 class SwitchQTable : public QTable {
    public:
-    SwitchQTable(const Environment& env, int max_switches);
+    SwitchQTable(const SimpleEnv& env, int max_switches);
 
     virtual void UpdateQValue(State state, Action action, State new_state, Reward reward);
 

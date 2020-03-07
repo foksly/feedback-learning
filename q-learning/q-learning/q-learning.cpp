@@ -1,17 +1,17 @@
 #include "q-learning.h"
 
-QTable::QTable(const Environment& env, double learning_rate, double discounting_rate)
+QTable::QTable(const SimpleEnv& env, double learning_rate, double discounting_rate)
     : qtable_(env.NumberOfStates(), std::vector<double>(env.NumberOfActions(), 0.0)),
       learning_rate_(learning_rate),
       discounting_rate_(discounting_rate) {}
 
-QTable::QTable(const Environment& env) : QTable(env, 0.5, 0.7) {}
+QTable::QTable(const SimpleEnv& env) : QTable(env, 0.5, 0.7) {}
 
 void QTable::SetLearningRate(double learning_rate) { learning_rate_ = learning_rate; }
 
 void QTable::SetDiscountingRate(double discounting_rate) { discounting_rate_ = discounting_rate; }
 
-void QTable::UpdateQValue(State state, Action action, State new_state, Reward reward) {
+void QTable::UpdateQValue(State state, SimpleEnv::Action action, State new_state, Reward reward) {
     auto max_new_state_qvalue =
         *std::max_element(qtable_[new_state].begin(), qtable_[new_state].end());
 
@@ -21,9 +21,9 @@ void QTable::UpdateQValue(State state, Action action, State new_state, Reward re
                           qtable_[state][static_cast<int>(action)]);
 }
 
-Action QTable::GetBestAction(State state) {
+SimpleEnv::Action QTable::GetBestAction(State state) {
     auto iter = std::max_element(qtable_[state].begin(), qtable_[state].end());
-    return static_cast<Action>(iter - qtable_[state].begin());
+    return static_cast<SimpleEnv::Action>(iter - qtable_[state].begin());
 }
 
 bool QTable::AllQValuesEqual(State state) {
@@ -79,7 +79,7 @@ void EpsilonWithDecay::Update(int episode) {
 
 QTable Train(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
     Maze maze(10, 0, 99);
-    Environment env(std::make_shared<Maze>(maze));
+    SimpleEnv env(std::make_shared<Maze>(maze));
     QTable qtable(env);
     std::mt19937 random_generator(time(0));
     std::uniform_real_distribution<> dist(0, 1);
@@ -95,7 +95,7 @@ QTable Train(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
         while (n_steps < max_steps && !is_done) {
             ++n_steps;
 
-            Action action = qtable.GetBestAction(state);
+            SimpleEnv::Action action = qtable.GetBestAction(state);
             if (dist(random_generator) < epsilon->value || qtable.AllQValuesEqual(state)) {
                 action = env.SampleAction();
             }
@@ -113,7 +113,7 @@ QTable Train(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
 
 QTable TrainAutoSwitch1dState(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
     // Maze maze(5, 0, 24);
-    Environment env(std::make_shared<Maze>(5, 0, 24));
+    SimpleEnv env(std::make_shared<Maze>(5, 0, 24));
     (*env.maze_)[4] = env.maze_->kKey;
 
     QTable qtable(env);
@@ -133,7 +133,7 @@ QTable TrainAutoSwitch1dState(int n_episodes, int max_steps, std::shared_ptr<Eps
         while (n_steps < max_steps && !is_done) {
             ++n_steps;
 
-            Action action = qtable.GetBestAction(state);
+            SimpleEnv::Action action = qtable.GetBestAction(state);
             if (dist(random_generator) < epsilon->value || qtable.AllQValuesEqual(state)) {
                 action = env.SampleAction();
             }
@@ -158,7 +158,7 @@ QTable TrainAutoSwitch1dState(int n_episodes, int max_steps, std::shared_ptr<Eps
 
 QTable TrainModelProblemN1(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
     Maze maze(5, 0, 8);
-    Environment env(std::make_shared<Maze>(maze));
+    SimpleEnv env(std::make_shared<Maze>(maze));
     (*env.maze_)[22] = env.maze_->kKey;
 
     QTable qtable(env);
@@ -183,7 +183,7 @@ QTable TrainModelProblemN1(int n_episodes, int max_steps, std::shared_ptr<Epsilo
         while (n_steps < max_steps && !is_done) {
             ++n_steps;
 
-            Action action = qtable.GetBestAction(state);
+            SimpleEnv::Action action = qtable.GetBestAction(state);
             if (dist(random_generator) < epsilon->value) {
                 action = env.SampleAction();
             }
@@ -212,7 +212,7 @@ QTable TrainModelProblemN1(int n_episodes, int max_steps, std::shared_ptr<Epsilo
 
 QTable TrainModelProblemN2(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
     Maze maze(5, 0, 8);
-    Environment env(std::make_shared<Maze>(maze));
+    SimpleEnv env(std::make_shared<Maze>(maze));
     (*env.maze_)[22] = env.maze_->kKey;
 
     std::vector<QTable> qtable(2, QTable(env));
@@ -237,7 +237,7 @@ QTable TrainModelProblemN2(int n_episodes, int max_steps, std::shared_ptr<Epsilo
         while (n_steps < max_steps && !is_done) {
             ++n_steps;
 
-            Action action = qtable[key_taken].GetBestAction(state);
+            SimpleEnv::Action action = qtable[key_taken].GetBestAction(state);
             if (dist(random_generator) < epsilon->value) {
                 action = env.SampleAction();
             }

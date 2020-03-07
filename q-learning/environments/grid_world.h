@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-enum class Action { Right, Left, Up, Down, Size = 4 };
+// enum class Action { Right, Left, Up, Down, Size = 4 };
 
 typedef int State;
 typedef int Reward;
@@ -72,37 +72,51 @@ struct Observation {
     bool is_done;
 };
 
-class Environment {
+class SimpleEnv {
    public:
-    explicit Environment(const std::shared_ptr<Maze>& maze);
+    enum class Action { Right, Left, Up, Down, Size = 4 };
 
-    Environment();
+    explicit SimpleEnv(const std::shared_ptr<Maze>& maze);
 
-    State Reset();
+    SimpleEnv();
 
-    void Render();
+    virtual State Reset();
 
-    Observation Step(Action action);
+    virtual void Render();
 
-    State GetCurrentState() const;
+    virtual Observation Step(Action action);
 
-    int NumberOfStates() const;
+    virtual State GetCurrentState() const;
 
-    State SampleState();
+    virtual int NumberOfStates() const;
 
-    int NumberOfActions() const;
+    virtual State SampleState();
 
-    Action SampleAction();
+    virtual int NumberOfActions() const;
+
+    virtual Action SampleAction();
 
     std::shared_ptr<Maze> maze_;
 
-   private:
+   protected:
     State current_state_;
     std::mt19937 random_generator;
 
-    bool IsValidForStep(State state, std::vector<char> valid_values);
+    virtual bool IsValidForStep(State state, std::vector<char> valid_values);
 
-    State GetNextState(State state, Action action);
+    virtual State GetNextState(State state, Action action);
 
-    Reward GetRewardForAction(State state, Action action);
+    virtual Reward GetRewardForAction(State state, Action action);
+};
+
+class SwitchEnv : protected SimpleEnv {
+   public:
+    enum class Action { Right, Left, Up, Down, Switch, Size = 5 };
+
+   protected:
+    virtual bool IsValidForStep(State state, std::vector<char> valid_values);
+
+    virtual State GetNextState(State state, Action action);
+
+    virtual Reward GetRewardForAction(State state, Action action);
 };
