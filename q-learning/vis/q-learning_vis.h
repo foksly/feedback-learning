@@ -22,4 +22,4 @@ void DrawGrid(sf::RenderWindow* window, const Maze& maze);
 void DrawCurrentState(sf::RenderWindow* window, Environment* env);
 
 void VisualizeQLearning(std::pair<int, int> maze_size, State start, State end, int speed,
-                        int n_episodes, int max_steps, Epsilon epsilon);
+                        int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon);

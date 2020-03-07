@@ -1,5 +1,3 @@
-// #pragma once
-
 #include "grid_world.h"
 
 Maze::Maze(int n_rows, int n_cols, State start, State end)
@@ -7,10 +5,10 @@ Maze::Maze(int n_rows, int n_cols, State start, State end)
     maze_[start] = kStart;
     maze_[end] = kEnd;
 
-    value_to_reward[kGrid] = -1;
-    value_to_reward[kStart] = -1;
-    value_to_reward[kEnd] = 100;
-    value_to_reward[kKey] = 1;
+    value2reward[kGrid] = 0;
+    value2reward[kStart] = 0;
+    value2reward[kEnd] = 1;
+    value2reward[kKey] = 0;
 }
 
 Maze::Maze(int size, State start, State end) : Maze(size, size, start, end) {}
@@ -24,7 +22,7 @@ Maze::Maze(int size, std::pair<int, int> start, std::pair<int, int> end)
 
 char Maze::operator[](State state) const { return maze_[state]; }
 
-char &Maze::operator[](State state) { return maze_[state]; }
+char& Maze::operator[](State state) { return maze_[state]; }
 
 size_t Maze::Size() const { return maze_.size(); }
 
@@ -34,7 +32,7 @@ int Maze::NumberOfCols() const { return n_cols_; }
 
 std::vector<char> Maze::GetValidForStepValues() const { return {kGrid, kKey, kStart, kEnd}; }
 
-Reward Maze::GetRewardInState(State state) { return value_to_reward[maze_[state]]; }
+Reward Maze::GetRewardInState(State state) { return value2reward[maze_[state]]; }
 
 State Maze::GetStartState() const { return start_; }
 
@@ -48,26 +46,27 @@ std::pair<int, int> Maze::ConvertStateToCoordinate(State state) const {
     return {state / n_cols_, state % n_cols_};
 }
 
-Environment::Environment(Maze maze)
-    : maze_(maze), current_state_(maze.GetStartState()), random_generator(time(0)) {}
+void Maze::ChangeRewardValue(char key, Reward reward) { value2reward[key] = reward; }
 
-Environment::Environment() : Environment({5, 0, 24}) {}
+Environment::Environment(const std::shared_ptr<Maze>& maze)
+    : maze_(maze), current_state_(maze->GetStartState()), random_generator(time(0)) {}
+
+Environment::Environment() : Environment(std::make_shared<Maze>(5, 0, 24)) {}
 
 State Environment::Reset() {
-    current_state_ = maze_.GetStartState();
+    current_state_ = maze_->GetStartState();
     return current_state_;
 }
 
 void Environment::Render() {
-    for (int index = 0; index < static_cast<int>(maze_.Size()); ++index) {
-        if (index % maze_.NumberOfRows() == 0) {
+    for (int index = 0; index < static_cast<int>(maze_->Size()); ++index) {
+        if (index % maze_->NumberOfRows() == 0) {
             std::cout << "\n";
         }
         if (index == current_state_) {
-            std::cout << "C"
-                      << " ";
+            std::cout << "(C, " << maze_->GetRewardInState(current_state_) << ") ";
         } else {
-            std::cout << maze_[index] << " ";
+            std::cout << "(" << (*maze_)[index] << ", " << maze_->GetRewardInState(index) << ") ";
         }
     }
     std::cout << "\n";
@@ -77,23 +76,21 @@ Observation Environment::Step(Action action) {
     State next_state = GetNextState(current_state_, action);
     Reward reward = GetRewardForAction(current_state_, action);
     bool is_done = false;
-    if (next_state == maze_.GetEndState()) {
+    if (next_state == maze_->GetEndState()) {
         is_done = true;
     }
     current_state_ = next_state;
     return {next_state, reward, is_done};
 }
 
-int Environment::NumberOfStates() { return static_cast<int>(maze_.Size()); }
-
-Maze Environment::GetMaze() { return maze_; }
+int Environment::NumberOfStates() const { return static_cast<int>(maze_->Size()); }
 
 State Environment::SampleState() {
-    std::uniform_int_distribution<int> dist(0, static_cast<int>(maze_.Size()) - 1);
+    std::uniform_int_distribution<int> dist(0, static_cast<int>(maze_->Size()) - 1);
     return dist(random_generator);
 }
 
-int Environment::NumberOfActions() { return static_cast<int>(Action::Size); }
+int Environment::NumberOfActions() const { return static_cast<int>(Action::Size); }
 
 Action Environment::SampleAction() {
     std::uniform_int_distribution<int> dist(0, static_cast<int>(Action::Size) - 1);
@@ -102,49 +99,41 @@ Action Environment::SampleAction() {
 
 State Environment::GetCurrentState() const { return current_state_; }
 
-State Environment::ConvertCoordinateToState(std::pair<int, int> coordinate) {
-    return maze_.NumberOfCols() * coordinate.first + coordinate.second;
-};
-
-std::pair<int, int> Environment::ConvertStateToCoordinate(State state) {
-    return {state / maze_.NumberOfCols(), state % maze_.NumberOfCols()};
-}
-
 bool Environment::IsValidForStep(State state, std::vector<char> valid_values) {
     bool is_valid = false;
     for (auto value : valid_values) {
-        is_valid |= maze_[state] == value;
+        is_valid |= (*maze_)[state] == value;
     }
     return is_valid;
 }
 
 State Environment::GetNextState(State state, Action action) {
-    std::pair<int, int> state_coordinates = ConvertStateToCoordinate(state);
-    if (action == Action::Right && state_coordinates.second < maze_.NumberOfCols() - 1) {
-        State next_state =
-            ConvertCoordinateToState({state_coordinates.first, state_coordinates.second + 1});
-        if (IsValidForStep(next_state, maze_.GetValidForStepValues())) {
+    std::pair<int, int> state_coordinates = maze_->ConvertStateToCoordinate(state);
+    if (action == Action::Right && state_coordinates.second < maze_->NumberOfCols() - 1) {
+        State next_state = maze_->ConvertCoordinateToState(
+            {state_coordinates.first, state_coordinates.second + 1});
+        if (IsValidForStep(next_state, maze_->GetValidForStepValues())) {
             return next_state;
         }
     }
     if (action == Action::Left && state_coordinates.second > 0) {
-        State next_state =
-            ConvertCoordinateToState({state_coordinates.first, state_coordinates.second - 1});
-        if (IsValidForStep(next_state, maze_.GetValidForStepValues())) {
+        State next_state = maze_->ConvertCoordinateToState(
+            {state_coordinates.first, state_coordinates.second - 1});
+        if (IsValidForStep(next_state, maze_->GetValidForStepValues())) {
             return next_state;
         }
     }
     if (action == Action::Up && state_coordinates.first > 0) {
-        State next_state =
-            ConvertCoordinateToState({state_coordinates.first - 1, state_coordinates.second});
-        if (IsValidForStep(next_state, maze_.GetValidForStepValues())) {
+        State next_state = maze_->ConvertCoordinateToState(
+            {state_coordinates.first - 1, state_coordinates.second});
+        if (IsValidForStep(next_state, maze_->GetValidForStepValues())) {
             return next_state;
         }
     }
-    if (action == Action::Down && state_coordinates.first < maze_.NumberOfRows() - 1) {
-        State next_state =
-            ConvertCoordinateToState({state_coordinates.first + 1, state_coordinates.second});
-        if (IsValidForStep(next_state, maze_.GetValidForStepValues())) {
+    if (action == Action::Down && state_coordinates.first < maze_->NumberOfRows() - 1) {
+        State next_state = maze_->ConvertCoordinateToState(
+            {state_coordinates.first + 1, state_coordinates.second});
+        if (IsValidForStep(next_state, maze_->GetValidForStepValues())) {
             return next_state;
         }
     }
@@ -153,5 +142,5 @@ State Environment::GetNextState(State state, Action action) {
 
 Reward Environment::GetRewardForAction(State state, Action action) {
     State next_state = GetNextState(state, action);
-    return maze_.GetRewardInState(next_state);
+    return maze_->GetRewardInState(next_state);
 }

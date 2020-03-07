@@ -52,7 +52,7 @@ void DrawGrid(sf::RenderWindow* window, const Maze& maze) {
 }
 
 void DrawCurrentState(sf::RenderWindow* window, Environment* env) {
-    auto state_position = env->maze_.ConvertStateToCoordinate(env->GetCurrentState());
+    auto state_position = env->maze_->ConvertStateToCoordinate(env->GetCurrentState());
     int thickness = 1;
     sf::RectangleShape rectangle = GetRect(kSquareSize - 2 * thickness,
                                            {state_position.second * kSquareSize + thickness,
@@ -69,9 +69,9 @@ void DrawCurrentState(sf::RenderWindow* window, Environment* env) {
 }
 
 void VisualizeQLearning(std::pair<int, int> maze_size, State start, State end, int speed,
-                        int n_episodes, int max_steps, Epsilon epsilon) {
+                        int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
     Maze maze = Maze(maze_size.first, maze_size.second, start, end);
-    Environment env(maze);
+    Environment env(std::make_shared<Maze>(maze));
 
     QTable qtable(env);
 
@@ -92,14 +92,14 @@ void VisualizeQLearning(std::pair<int, int> maze_size, State start, State end, i
             }
             if (event.type == sf::Event::MouseButtonPressed && !is_started) {
                 if (event.mouseButton.button == sf::Mouse::Left) {
-                    env.maze_[env.maze_.ConvertCoordinateToState(
+                    (*env.maze_)[env.maze_->ConvertCoordinateToState(
                         {event.mouseButton.y / kSquareSize, event.mouseButton.x / kSquareSize})] =
-                        env.maze_.kWall;
+                        env.maze_->kWall;
                 }
                 if (event.mouseButton.button == sf::Mouse::Right) {
-                    env.maze_[env.maze_.ConvertCoordinateToState(
+                    (*env.maze_)[env.maze_->ConvertCoordinateToState(
                         {event.mouseButton.y / kSquareSize, event.mouseButton.x / kSquareSize})] =
-                        env.maze_.kGrid;
+                        env.maze_->kGrid;
                 }
             }
             if (event.type == sf::Event::KeyPressed) {
@@ -110,7 +110,7 @@ void VisualizeQLearning(std::pair<int, int> maze_size, State start, State end, i
         }
         if (!is_started) {
             window.clear(sf::Color::White);
-            DrawGrid(&window, env.maze_);
+            DrawGrid(&window, *env.maze_);
             window.display();
         } else {
             for (int episode = 0; episode < n_episodes; ++episode) {
@@ -131,13 +131,13 @@ void VisualizeQLearning(std::pair<int, int> maze_size, State start, State end, i
                         }
                     }
                     window.clear(sf::Color::White);
-                    DrawGrid(&window, env.maze_);
+                    DrawGrid(&window, *env.maze_);
                     DrawCurrentState(&window, &env);
                     window.display();
                     sf::sleep(sf::milliseconds(speed));
 
                     Action action = qtable.GetBestAction(state);
-                    if (dist(random_generator) < epsilon.value) {
+                    if (dist(random_generator) < epsilon->value) {
                         action = env.SampleAction();
                     }
                     Observation observation = env.Step(action);
@@ -145,8 +145,8 @@ void VisualizeQLearning(std::pair<int, int> maze_size, State start, State end, i
                     is_done = observation.is_done;
                     state = observation.state;
                 }
-                epsilon.Update(episode);
-                qtable.Render(env.maze_.NumberOfCols(), env.maze_);
+                epsilon->Update(episode);
+                qtable.Render(env.maze_->NumberOfCols(), *env.maze_);
             }
             is_started = false;
         }

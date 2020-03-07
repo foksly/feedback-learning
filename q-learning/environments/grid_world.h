@@ -4,6 +4,7 @@
 #include <cmath>
 #include <ctime>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <unordered_map>
 #include <vector>
@@ -45,6 +46,8 @@ class Maze {
 
     std::pair<int, int> ConvertStateToCoordinate(State state) const;
 
+    void ChangeRewardValue(char key, Reward Reward);
+
     const char kGrid = 'G';
     const char kStart = 'S';
     const char kEnd = 'E';
@@ -60,7 +63,7 @@ class Maze {
     State start_;
     State end_;
 
-    std::unordered_map<char, Reward> value_to_reward;
+    std::unordered_map<char, Reward> value2reward;
 };
 
 struct Observation {
@@ -71,7 +74,7 @@ struct Observation {
 
 class Environment {
    public:
-    explicit Environment(Maze maze);
+    explicit Environment(const std::shared_ptr<Maze>& maze);
 
     Environment();
 
@@ -83,21 +86,15 @@ class Environment {
 
     State GetCurrentState() const;
 
-    int NumberOfStates();
+    int NumberOfStates() const;
 
     State SampleState();
 
-    int NumberOfActions();
+    int NumberOfActions() const;
 
     Action SampleAction();
 
-    State ConvertCoordinateToState(std::pair<int, int> coordinate);
-
-    std::pair<int, int> ConvertStateToCoordinate(State state);
-
-    Maze GetMaze();
-
-    Maze maze_;
+    std::shared_ptr<Maze> maze_;
 
    private:
     State current_state_;
