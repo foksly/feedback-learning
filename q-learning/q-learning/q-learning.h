@@ -1,38 +1,55 @@
 #pragma once
 
 #include "../environments/grid_world.h"
+#include <memory>
 
 class QTable {
    public:
-    QTable(Environment env, double learning_rate, double discounting_rate);
+    QTable(const Environment& env, double learning_rate, double discounting_rate);
 
-    explicit QTable(Environment env);
+    explicit QTable(const Environment& env);
 
-    void SetLearningRate(double learning_rate);
+    virtual void SetLearningRate(double learning_rate);
 
-    void SetDiscountingRate(double discounting_rate);
+    virtual void SetDiscountingRate(double discounting_rate);
 
-    void UpdateQValue(State state, Action action, State new_state, Reward reward);
+    virtual void UpdateQValue(State state, Action action, State new_state, Reward reward);
 
-    Action GetBestAction(State state);
+    virtual Action GetBestAction(State state);
 
-    void Reset();
+    virtual void Reset();
 
-    void Render(int n_cols, const Maze& maze);
+    virtual void Render(int n_cols, const Maze& maze);
 
    private:
     std::vector<std::vector<double>> qtable_;
+
     double learning_rate_;
     double discounting_rate_;
 };
 
-struct Epsilon {
-    double value = 1.0;
+class Epsilon {
+public:
+    explicit Epsilon(double value_) : value(value_) {}
+    double value = 0.5;
+
+    virtual void Update(int episode) {};
+    virtual ~Epsilon() {};
+};
+
+class EpsilonWithDecay : public Epsilon {
+public:
+    explicit EpsilonWithDecay(double value) : Epsilon(value) {}
     double max_epsilon = 1.0;
     double min_epsilon = 0.01;
     double decay_rate = 0.01;
 
-    void Update(int episode);
+    virtual void Update(int episode);
+
 };
 
-QTable Train(int n_episodes, int max_steps, Epsilon epsilon);
+QTable Train(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon);
+
+QTable TrainModelProblemN1(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon);
+
+QTable TrainModelProblemN2(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon);
