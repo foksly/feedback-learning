@@ -7,7 +7,7 @@ Maze::Maze(int n_rows, int n_cols, State start, State end)
 
     value2reward[kGrid] = 0;
     value2reward[kStart] = 0;
-    value2reward[kEnd] = 1;
+    value2reward[kEnd] = 0;
     value2reward[kKey] = 0;
 }
 
@@ -194,9 +194,11 @@ State SwitchEnv::GetNextState(State state, Action action) {
 
 Reward SwitchEnv::GetRewardForAction(State state, Action action) {
     State next_state = GetNextState(state, action);
-    if (action == Action::Switch && n_swithches_ < max_switches_ &&
-        key_order_[n_swithches_] == state) {
-        return 0;
+    if (action == Action::Switch) {
+        if (n_swithches_ < max_switches_ && key_order_[n_swithches_] == state) {
+            return 1;
+        }
+        return -1;
     }
     if (next_state == maze_->GetEndState()) {
         bool all_correct = true;

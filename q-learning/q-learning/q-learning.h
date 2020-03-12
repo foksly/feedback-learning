@@ -89,3 +89,5 @@ QTable TrainAutoSwitch1dState(int n_episodes, int max_steps, std::shared_ptr<Eps
 
 SwitchQTable TrainAutoSwitch2dState(int n_episodes, int max_steps,
                                     std::shared_ptr<Epsilon> epsilon);
+
+SwitchQTable TrainBackAndForth(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon);

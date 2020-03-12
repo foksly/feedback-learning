@@ -214,15 +214,15 @@ void SwitchQTable::Render(int n_cols, const Maze& maze) {
                 current_direction = '-';
             }
             if (maze[index] == maze.kWall) {
-                std::cout << "\033[1;31mW\033[0m" << current_direction << " ";
+                std::cout << "W" << current_direction << " ";
             } else if (maze[index] == maze.kStart) {
-                std::cout << "\033[1;31mB\033[0m" << current_direction << " ";
+                std::cout << "B" << current_direction << " ";
             } else if (maze[index] == maze.kEnd) {
-                std::cout << "\033[1;31mE\033[0m" << current_direction << " ";
+                std::cout << "E" << current_direction << " ";
             }
 
             else if (maze[index] == maze.kKey) {
-                std::cout << "\033[1;31mK\033[0m" << current_direction << " ";
+                std::cout << "K" << current_direction << " ";
             } else if (AllQValuesEqual({index, n_switch})) {
                 std::cout << "-  ";
             }
@@ -237,10 +237,81 @@ void SwitchQTable::Render(int n_cols, const Maze& maze) {
 
 SwitchQTable TrainAutoSwitch2dState(int n_episodes, int max_steps,
                                     std::shared_ptr<Epsilon> epsilon) {
-    SwitchEnv env(std::make_shared<Maze>(5, 20, 24), {2});
-    for (auto s : env.GetKeyOrder()) {
-        (*env.maze_)[s] = env.maze_->kKey;
+    std::vector<int> keys = {3, 10};
+    SwitchEnv env(std::make_shared<Maze>(5, 20, 24), keys);
+    (*env.maze_)[3] = env.maze_->kKey;
+    (*env.maze_)[10] = env.maze_->kKey;
+
+    SwitchQTable qtable(env);
+    std::mt19937 random_generator(time(0));
+    std::uniform_real_distribution<> dist(0, 1);
+
+    env.Render();
+
+    for (int episode = 0; episode < n_episodes; ++episode) {
+        State state = env.Reset();
+
+        int n_steps = 0;
+        bool is_done = false;
+
+        int n_key = 0;
+        int total_reward = 0;
+
+        while (n_steps < max_steps && !is_done) {
+            ++n_steps;
+
+            SwitchEnv::Action action = qtable.GetBestAction({state, env.GetNumberOfSwitches()});
+            if (dist(random_generator) < epsilon->value ||
+                qtable.AllQValuesEqual({state, env.GetNumberOfSwitches()})) {
+                action = env.SampleAction();
+                while (action == SwitchEnv::Action::Switch) {
+                    action = env.SampleAction();
+                }
+            }
+
+            if (env.GetNumberOfSwitches() < env.max_switches_ &&
+                state == env.GetKeyOrder()[n_key]) {
+                ++n_key;
+                action = SwitchEnv::Action::Switch;
+            }
+
+            int current_switches = env.GetNumberOfSwitches();
+
+            Observation observation = env.Step(action);
+
+            total_reward += observation.reward;
+
+            qtable.UpdateQValue({state, current_switches}, action,
+                                {observation.state, env.GetNumberOfSwitches()}, observation.reward);
+            is_done = observation.is_done;
+            state = observation.state;
+        }
+        epsilon->Update(episode);
+        std::cout << "=======================\n";
+        std::cout << "Episode: " << episode << "\n";
+        std::cout << "Total reward: " << total_reward << "\n";
+        env.Render();
+        qtable.Render(env.maze_->NumberOfCols(), *env.maze_);
+        // std::cout << "eps: " << epsilon->value << "\n";
+        std::cout << "CORRECT SWITCHES: ";
+        for (auto corr : env.correct_switches_) {
+            if (corr) {
+                std::cout << "T ";
+            } else {
+                std::cout << "F ";
+            }
+        }
+        std::cout << "\n";
     }
+
+    return qtable;
+}
+
+SwitchQTable TrainBackAndForth(int n_episodes, int max_steps, std::shared_ptr<Epsilon> epsilon) {
+    std::vector<int> keys = {2};
+    SwitchEnv env(std::make_shared<Maze>(4, 12, 15), keys);
+    (*env.maze_)[2] = env.maze_->kKey;
+    // (*env.maze_)[10] = env.maze_->kKey;
 
     SwitchQTable qtable(env);
     std::mt19937 random_generator(time(0));
@@ -263,23 +334,18 @@ SwitchQTable TrainAutoSwitch2dState(int n_episodes, int max_steps,
             if (dist(random_generator) < epsilon->value ||
                 qtable.AllQValuesEqual({state, env.GetNumberOfSwitches()})) {
                 action = env.SampleAction();
-                while (action == SwitchEnv::Action::Switch) {
-                    action = env.SampleAction();
-                }
             }
-
-            if (state == env.GetKeyOrder()[0] && env.GetNumberOfSwitches() < env.max_switches_) {
-                action = SwitchEnv::Action::Switch;
-            }
-
             int current_switches = env.GetNumberOfSwitches();
-
+            if (action == SwitchEnv::Action::Switch &&
+                env.GetNumberOfSwitches() < env.max_switches_) {
+                std::cout << state << " " << env.GetNumberOfSwitches() << "\n";
+            }
             Observation observation = env.Step(action);
-
-            total_reward += observation.reward;
 
             qtable.UpdateQValue({state, current_switches}, action,
                                 {observation.state, env.GetNumberOfSwitches()}, observation.reward);
+
+            total_reward += observation.reward;
             is_done = observation.is_done;
             state = observation.state;
         }
