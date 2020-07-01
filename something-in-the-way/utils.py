@@ -1,7 +1,9 @@
+import heapq
 import numpy as np
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
 from functools import wraps
+from itertools import count
 from IPython import display
 
 import torch
@@ -11,6 +13,20 @@ from torch import nn
 # ---------------------------------------------
 #               Replay buffer
 # ---------------------------------------------
+
+def add_transition(transition, coords, obses, n_completed, actions, rewards,
+                   coords_next, obses_next, n_completed_next, dones):
+    state, action, reward, state_next, done = transition
+    coords.append(np.array(state[0]))
+    obses.append(state[1])
+    n_completed.append(np.array([state[2]]))
+    actions.append(np.array(action))
+    rewards.append(reward)
+    coords_next.append(np.array(state_next[0]))
+    obses_next.append(state_next[1])
+    n_completed_next.append(np.array([state_next[2]]))
+    dones.append(done) 
+
 
 class ReplayBuffer(object):
     def __init__(self, size):
@@ -34,6 +50,7 @@ class ReplayBuffer(object):
         else:
             self._storage[self._next_idx] = trajectory
         self._next_idx = (self._next_idx + 1) % self._maxsize
+
 
     def sample(self, batch_size):
         """Sample a batch of experiences.
@@ -67,16 +84,9 @@ class ReplayBuffer(object):
         for i in traj_idxs:
             idx = np.random.choice(len(self._storage[i]))
             data = self._storage[i][idx]
-            state, action, reward, state_next, done = data
-            coords.append(np.array(state[0], copy=False))
-            obses.append(state[1])
-            n_completed.append(np.array([state[2]]))
-            actions.append(np.array(action, copy=False))
-            rewards.append(reward)
-            coords_next.append(np.array(state_next[0], copy=False))
-            obses_next.append(state_next[1])
-            n_completed_next.append(np.array([state[2]]))
-            dones.append(done)
+            add_transition(data, coords, obses, n_completed, actions, rewards, 
+                           coords_next, obses_next, n_completed_next, dones)
+
         return (np.array(coords), np.array(obses), np.array(n_completed), 
                 np.array(actions), np.array(rewards), np.array(coords_next), 
                 np.array(obses_next), np.array(n_completed_next), np.array(dones))
@@ -95,12 +105,12 @@ class ReplayBuffer(object):
             i_coords_next, i_obses_next, i_n_completed_next = [], [], []
             for d in data:
                 state, action, reward, state_next, _ = d
-                i_coords.append(np.array(state[0], copy=False))
+                i_coords.append(np.array(state[0]))
                 i_obses.append(state[1])
                 i_n_completed.append(np.array([state[2]]))
-                i_coords_next.append(np.array(state_next[0], copy=False))
+                i_coords_next.append(np.array(state_next[0]))
                 i_obses_next.append(state_next[1])
-                i_n_completed_next.append(np.array([state[2]]))
+                i_n_completed_next.append(np.array([state_next[2]]))
             
             coords.append(i_coords)
             obses.append(i_obses_next)
@@ -110,7 +120,7 @@ class ReplayBuffer(object):
             n_completed_next.append(i_n_completed)
 
             state, action, reward, state_next, done = data[-1]
-            actions.append(np.array(action, copy=False))
+            actions.append(np.array(action))
             rewards.append(reward)
             dones.append(done)
         return (coords, obses, n_completed, 
@@ -118,8 +128,40 @@ class ReplayBuffer(object):
                 obses_next, n_completed_next, np.array(dones))
 
 
+class PriorityReplayBuffer:
+    def __init__(self, size):
+        self._storage = []
+        self._maxsize = size
+        self._id = count()
+    
+    def __len__(self):
+        return len(self._storage)
+    
+    def add(self, trajectory, reward):
+        if len(self._storage) < self._maxsize:
+            heapq.heappush(self._storage, (reward, next(self._id), trajectory))
+        if self._storage[0][0] < reward:
+            heapq.heappop(self._storage)
+            heapq.heappush(self._storage, (reward, next(self._id), trajectory))
 
-def collect_trajectories(n_trajs, agent, env, exp_replay, max_steps=20, use_hints=True):
+    def sample(self, batch_size):
+        coords, obses, n_completed, actions, rewards = [], [], [], [], []
+        coords_next, obses_next, n_completed_next, dones = [], [], [], []
+        total_transitions = sum(len(t) for t in self._storage)
+        probs = [len(t) / total_transitions for t in self._storage]
+        traj_idxs = np.random.choice(len(self._storage), batch_size, p=probs)
+        for i in traj_idxs:
+            idx = np.random.choice(len(self._storage[i][2]))
+            data = self._storage[i][2][idx]
+            add_transition(data, coords, obses, n_completed, actions, rewards, 
+                           coords_next, obses_next, n_completed_next, dones)
+        return (np.array(coords), np.array(obses), np.array(n_completed), 
+                np.array(actions), np.array(rewards), np.array(coords_next), 
+                np.array(obses_next), np.array(n_completed_next), np.array(dones))
+
+
+def collect_trajectories(n_trajs, agent, env, exp_replay, 
+                         max_steps=20, use_hints=True, priority=False):
     for _ in range(n_trajs):
         trajectory = []
         s = env.reset()
@@ -140,12 +182,16 @@ def collect_trajectories(n_trajs, agent, env, exp_replay, max_steps=20, use_hint
             trajectory.append([s, a, r, next_s, done])
             s = next_s
             n_steps += 1
-        exp_replay.add(trajectory)
+        if priority:
+            exp_replay.add(trajectory, total_reward)
+        else:
+            exp_replay.add(trajectory)
 
 
 def collect_trajectories_batch(n_trajs, agent, make_env, 
-                               exp_replay, max_steps=20, 
-                               use_hints=True, device=torch.device('cuda')):
+                               exp_replay, priority_exp_replay=None,
+                               max_steps=20, use_hints=True, 
+                               device=torch.device('cuda')):
 
     agent.eval()
     envs = [make_env() for _ in range(n_trajs)]
@@ -153,6 +199,7 @@ def collect_trajectories_batch(n_trajs, agent, make_env,
     states = [env.reset() for env in envs]
     n_steps = 0
     dones = [False for _ in range(n_trajs)]
+    rewards = [0 for _ in range(n_trajs)]
     if use_hints:
         hints_coords, hints_obses, hints_actions = hints2tensor(envs[0].get_hints())
 
@@ -164,12 +211,12 @@ def collect_trajectories_batch(n_trajs, agent, make_env,
 
         for i in range(len(dones)):
             if not dones[i]:
-                coords.append(np.array(states[i][0], copy=False))
+                coords.append(np.array(states[i][0]))
                 obses.append(states[i][1])
                 n_completed.append(np.array([states[i][2]]))
         if len(coords) == 0:
             break
-            
+
         coords_t = torch.as_tensor(np.array(coords), device=device)
         obses_t = torch.as_tensor(np.array(obses), dtype=torch.long, device=device) 
         n_completed_t = torch.as_tensor(np.array(n_completed), device=device)
@@ -186,16 +233,21 @@ def collect_trajectories_batch(n_trajs, agent, make_env,
         for i in range(len(dones)):
             if not dones[i]:
                 next_s, r, done = envs[i].step(actions[idx])
+                rewards[i] += r
                 trajs[i].append([states[i], actions[idx], r, next_s, done])
                 if done:
                     dones[i] = True
                 states[i] = next_s
                 idx += 1
-    for traj in trajs:
-        exp_replay.add(traj)
+    for i in range(len(trajs)):
+        exp_replay.add(trajs[i])
+        if priority_exp_replay is not None:
+            priority_exp_replay.add(trajs[i], rewards[i])
+            
 
 
 def evaluate(n_trajs, agent, env, max_steps=20, use_hints=True):
+    agent.eval()
     rewards = []
     for _ in range(n_trajs):
         s = env.reset()
@@ -224,7 +276,7 @@ def evaluate(n_trajs, agent, env, max_steps=20, use_hints=True):
 def hints2tensor(hints, device=torch.device('cuda')):
     coords, obs, action = [], [], []
     for hint in hints:
-        coords.append(np.array(hint[0].coord, copy=False))
+        coords.append(np.array(hint[0].coord))
         obs.append(hint[0].obs)
         action.append(np.array([hint[1]]))
     coords_t = torch.as_tensor(coords, device=device)
@@ -338,7 +390,7 @@ def ignore_keyboard_traceback(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
-            func(*args, **kwargs)
+            return func(*args, **kwargs)
         except KeyboardInterrupt:
             pass
 
@@ -427,7 +479,7 @@ def train(n_epochs,
 
 
 @ignore_keyboard_traceback
-def train_async(n_epochs,
+def train_sync(n_epochs,
                 make_env,
                 agent,
                 target_network,
@@ -464,12 +516,11 @@ def train_async(n_epochs,
         
         collect_trajectories_batch(trajs_per_epoch, agent, make_env, exp_replay, max_steps, use_hints=use_hints)
 
-        optimizer.zero_grad()
-
         # loss
         agent.train()
         batch_loss = 0
         for _ in range(batches_per_epoch):
+            optimizer.zero_grad()
             coords, obs, n_completed, a, r, \
             next_coords, next_obs, next_n_completed, is_done = exp_replay.sample(batch_size)
             loss = compute_td_loss(coords,
@@ -497,8 +548,8 @@ def train_async(n_epochs,
                 loss_log.append(batch_loss)
         
         if epoch % reward_log_freq == 0:
-            agent.epsilon = 0.1
-            reward_log.append(evaluate(5, agent, make_env(), max_steps, use_hints=use_hints))
+            agent.epsilon = 0
+            reward_log.append(evaluate(1, agent, make_env(), max_steps, use_hints=use_hints))
             if best_seen_reward < reward_log[-1]:
                 best_seen_reward = reward_log[-1]
                 save_model(save_path, agent.state_dict(), epoch, best_seen_reward)
@@ -511,6 +562,112 @@ def train_async(n_epochs,
         if epoch % refresh_target_network_freq == 0:
             target_network.load_state_dict(agent.state_dict())
 
+
+def train_batch(agent, target_network, optimizer, exp_replay, 
+                hints, batch_size, device, zero_grad=True, step=True):
+    agent.train()
+    if zero_grad:
+        optimizer.zero_grad()
+    coords, obs, n_completed, a, r, \
+    next_coords, next_obs, next_n_completed, is_done = exp_replay.sample(batch_size)
+
+    loss = compute_td_loss(coords,
+                           obs,
+                           n_completed,
+                           a,
+                           r,
+                           next_coords,
+                           next_obs,
+                           next_n_completed,
+                           is_done,
+                           agent,
+                           target_network,
+                           hints,
+                           device=device)
+    loss.backward()
+    if step:
+        optimizer.step()
+    return loss.item()
+
+@ignore_keyboard_traceback
+def train_priority(n_epochs,
+                   make_env,
+                   agent,
+                   target_network,
+                   optimizer,
+                   exp_replay,
+                   priority_exp_replay,
+                   hints,
+                   epsilon,
+                   trajs_per_epoch,
+                   batches_per_epoch,
+                   priority_batches_per_epoch,
+                   batch_size,
+                   max_steps=50,
+                   device=torch.device('cuda'),
+                   refresh_target_network_freq=100,
+                   loss_log_freq=20,
+                   reward_log_freq=10,
+                   plot_every=100,
+                   loss_clip=2,
+                   min_reward_for_saving=5,
+                   save_path='agent.pt'):
+
+    agent.to(device)
+    target_network.to(device)
+
+    loss_log = []
+    reward_log = []
+    best_seen_reward = min_reward_for_saving
+
+    use_hints = False
+    if hints is not None:
+        use_hints = True
+    
+    for epoch in range(n_epochs + 1):
+        agent.epsilon = epsilon.get_value(epoch)
+        
+        collect_trajectories_batch(trajs_per_epoch, agent, make_env, exp_replay, 
+                                   priority_exp_replay, max_steps, use_hints=use_hints)
+
+        # loss
+        agent.train()
+        batch_loss = 0
+        for _ in range(batches_per_epoch):
+            batch_loss += train_batch(agent, target_network, optimizer, 
+                                      exp_replay, hints, batch_size, device, 
+                                      zero_grad=True, step=False)
+            batch_loss += train_batch(agent, target_network, optimizer, 
+                                      priority_exp_replay, hints, batch_size, device,
+                                      zero_grad=False, step=True)
+        # for _ in range(priority_batches_per_epoch):
+            
+
+
+        if (epoch + 1) % loss_log_freq == 0:
+            batch_loss /= batches_per_epoch + priority_batches_per_epoch
+            if batch_loss > loss_clip:
+                loss_log.append(loss_clip)
+            else:
+                loss_log.append(batch_loss)
+        
+        if (epoch + 1) % reward_log_freq == 0:
+            eps = agent.epsilon
+            agent.epsilon = 0
+            reward_log.append(evaluate(1, agent, make_env(), max_steps, use_hints=use_hints))
+            if best_seen_reward < reward_log[-1]:
+                best_seen_reward = reward_log[-1]
+                save_model(save_path, agent.state_dict(), epoch, best_seen_reward)
+            agent.epsilon = eps
+
+        if (epoch + 1) % plot_every == 0:
+            display.clear_output()
+            print(f'Epoch #{epoch}')
+            plot_progress(loss_log, reward_log)
+
+        if (epoch + 1) % refresh_target_network_freq == 0:
+            target_network.load_state_dict(agent.state_dict())
+    return reward_log
 
 # ---------------------------------------------
 #               Epsilon
@@ -545,3 +702,4 @@ class ExpEpsilon(Epsilon):
     def get_value(self, episode):
         return self.min_epsilon + (self.max_epsilon - self.min_epsilon
                                    ) * np.exp(-self.gamma * episode)
+

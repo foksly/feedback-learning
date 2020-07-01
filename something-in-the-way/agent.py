@@ -121,8 +121,9 @@ class DQNAgent(nn.Module):
         qvalue for a single raw state
         """
         coord, obs, n_completed = self.preprocessor.to_tensor(state)
-        qvalues = self.forward(coord, obs, n_completed)
-        return qvalues.detach().cpu().numpy()
+        with torch.no_grad():
+            qvalues = self.forward(coord, obs, n_completed)
+        return qvalues.cpu().numpy()
 
     def sample_actions(self, qvalues, greedy=True):
         """ Pick actions given qvalues. Uses epsilon-greedy exploration strategy. """
@@ -210,10 +211,10 @@ class TransformerAttention(nn.Module):
 
     
     def forward(self, state, hints):
-        s_enc = self.encode_state(state)
-        h_enc = self.encode_hint(hints)
-        h_self_attn = self.t_encoder(h_enc.unsqueeze(1))
-        h_self_attn = h_self_attn.repeat(1, s_enc.shape[0], 1)
+        s_enc = self.encode_state(state) # state [batch_size, state_dim]
+        h_enc = self.encode_hint(hints) # hints [n_hints, state_dim] 
+        h_self_attn = self.t_encoder(h_enc.unsqueeze(1)) 
+        h_self_attn = h_self_attn.repeat(1, s_enc.shape[0], 1) # [n_hints, batch_size, state_dim]
 
         s_decoded = self.t_decoder(s_enc.unsqueeze(0), h_self_attn)
         return s_decoded.squeeze(0)
@@ -247,8 +248,8 @@ class DQNAttnAgent(nn.Module):
                     completed_emb_dim
         
         hint_dim = coord_emb_dim * 2 + \
-                    receptive_field * receptive_field * field_emb_dim + \
-                    action_emb_dim
+                   receptive_field * receptive_field * field_emb_dim + \
+                   action_emb_dim
         
         assert attn_model in {'fc', 'lstm', 'transformer'}, "attn_model should be in {'fc', 'lstm', 'transformer'}"
 
@@ -264,6 +265,7 @@ class DQNAttnAgent(nn.Module):
                                  nn.Linear(256, 128), nn.LeakyReLU(),
                                  nn.Linear(128, 128), nn.LeakyReLU(),
                                  nn.Linear(128, n_actions))
+        # self.net = nn.Linear(state_dim + attn_dim, n_actions)
     
     def forward(self, coords, obses, n_completed,
                       hint_coords, hint_obses, hint_actions):
