@@ -18,7 +18,7 @@ def _build_bridge(coord, field, pattern, value):
     coord is the first bridge cell
     bridge should be in format 'rdr' - right, down, right
     """
-    hints = []
+    hints = [(coord[0], coord[1] - 1, 'R')]
 
     field[coord[0]][coord[1]] = value
     for direction in pattern:
@@ -117,7 +117,7 @@ def field_generator(n_bridges,
         x = np.random.randint(pad_width + upper_range,
                               field.shape[0] - pad_width - lower_range)
         bridge_hints = _build_bridge([x, y], field, pattern, bridge_color)
-        hints.extend(bridge_hints)
+        hints.append(bridge_hints)
 
         reward[bridge_hints[-1]] = bridge_reward
 
@@ -129,3 +129,4 @@ def field_generator(n_bridges,
 
     return _make_config(field, receptive_field, start_position, goal_position,
                        values, reward, hints)
+

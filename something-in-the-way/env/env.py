@@ -90,14 +90,29 @@ class Environment:
                      self._get_receptive_field(self.agent_position), 
                      self.reward.completed_bridges), reward_for_step, is_done
                 
+    def get_hint(self, state, hint_type):
+        if hint_type == 'next_direction':
+            direction2int = {'U': 0, 'D': 1, 'R': 2}
+            if state.n_completed < len(self.hints):
+                closest_reward_x = self.hints[state.n_completed][0][0]
+            else:
+                closest_reward_x = self.goal_position.x
+            
+            if state.coord.x == closest_reward_x:
+                return direction2int['R']
+            elif state.coord.x < closest_reward_x:
+                return direction2int['D']
+            else:
+                return direction2int['U']
 
-    def get_hints(self):
+
+    def get_static_hint(self):
         hints = []
         for t in self.hints:
             coord = Position(t[0], t[1])
             obs = self._get_receptive_field(coord)
-            state = State(coord, obs, -1)
-            hints.append((state, self.action2index[t[2]]))
+            state = State(coord, obs, t[2])
+            hints.append(state)
         return hints
 
     def reset(self):

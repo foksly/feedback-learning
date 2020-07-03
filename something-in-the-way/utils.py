@@ -15,8 +15,12 @@ from torch import nn
 # ---------------------------------------------
 
 def add_transition(transition, coords, obses, n_completed, actions, rewards,
-                   coords_next, obses_next, n_completed_next, dones):
-    state, action, reward, state_next, done = transition
+                   coords_next, obses_next, n_completed_next, dones, hints):
+    if hints is not None:
+        state, action, reward, state_next, done, hint = transition
+    else:
+        state, action, reward, state_next, done = transition
+
     coords.append(np.array(state[0]))
     obses.append(state[1])
     n_completed.append(np.array([state[2]]))
@@ -25,7 +29,9 @@ def add_transition(transition, coords, obses, n_completed, actions, rewards,
     coords_next.append(np.array(state_next[0]))
     obses_next.append(state_next[1])
     n_completed_next.append(np.array([state_next[2]]))
-    dones.append(done) 
+    dones.append(done)
+    if hints is not None:
+        hints.append(hint)
 
 
 class ReplayBuffer(object):
@@ -40,6 +46,12 @@ class ReplayBuffer(object):
         self._storage = []
         self._maxsize = size
         self._next_idx = 0
+    
+    def _get_traj(self, traj_idx, transition_idx):
+        return self._storage[traj_idx][transition_idx]
+
+    def _sample_transition_idx(self, traj_idx):
+        return np.random.choice(len(self._storage[traj_idx]))
 
     def __len__(self):
         return len(self._storage)
@@ -52,7 +64,7 @@ class ReplayBuffer(object):
         self._next_idx = (self._next_idx + 1) % self._maxsize
 
 
-    def sample(self, batch_size):
+    def sample(self, batch_size, add_hint=False):
         """Sample a batch of experiences.
         Parameters
         ----------
@@ -78,64 +90,31 @@ class ReplayBuffer(object):
         """
         coords, obses, n_completed, actions, rewards = [], [], [], [], []
         coords_next, obses_next, n_completed_next, dones = [], [], [], []
+        hints = [] if add_hint else None
+
         total_transitions = sum(len(t) for t in self._storage)
         probs = [len(t) / total_transitions for t in self._storage]
         traj_idxs = np.random.choice(len(self._storage), batch_size, p=probs)
         for i in traj_idxs:
-            idx = np.random.choice(len(self._storage[i]))
-            data = self._storage[i][idx]
+            idx = self._sample_transition_idx(i)
+            data = self._get_traj(i, idx)
             add_transition(data, coords, obses, n_completed, actions, rewards, 
-                           coords_next, obses_next, n_completed_next, dones)
+                           coords_next, obses_next, n_completed_next, dones, hints)
 
-        return (np.array(coords), np.array(obses), np.array(n_completed), 
+        batch = [np.array(coords), np.array(obses), np.array(n_completed), 
                 np.array(actions), np.array(rewards), np.array(coords_next), 
-                np.array(obses_next), np.array(n_completed_next), np.array(dones))
-    
-    def sample_window(self, batch_size, window_size=-1):
-        coords, obses, n_completed, actions, rewards = [], [], [], [], []
-        coords_next, obses_next, n_completed_next, dones = [], [], [], []
-        total_transitions = sum(len(t) for t in self._storage)
-        probs = [len(t) / total_transitions for t in self._storage]
-        traj_idxs = np.random.choice(len(self._storage), batch_size, p=probs)
-        for i in traj_idxs:
-            idx = np.random.choice(len(self._storage[i]))
-            from_ = 0 if window_size == -1 else max(0, idx - window_size)
-            data = self._storage[i][from_:idx + 1]
-            i_coords, i_obses, i_n_completed = [], [], []
-            i_coords_next, i_obses_next, i_n_completed_next = [], [], []
-            for d in data:
-                state, action, reward, state_next, _ = d
-                i_coords.append(np.array(state[0]))
-                i_obses.append(state[1])
-                i_n_completed.append(np.array([state[2]]))
-                i_coords_next.append(np.array(state_next[0]))
-                i_obses_next.append(state_next[1])
-                i_n_completed_next.append(np.array([state_next[2]]))
-            
-            coords.append(i_coords)
-            obses.append(i_obses_next)
-            n_completed.append(i_n_completed)
-            coords_next.append(i_coords_next)
-            obses_next.append(i_obses_next)
-            n_completed_next.append(i_n_completed)
+                np.array(obses_next), np.array(n_completed_next), np.array(dones)]
+        
+        if hints is not None:
+            batch.append(hints)
 
-            state, action, reward, state_next, done = data[-1]
-            actions.append(np.array(action))
-            rewards.append(reward)
-            dones.append(done)
-        return (coords, obses, n_completed, 
-                np.array(actions), np.array(rewards), coords_next, 
-                obses_next, n_completed_next, np.array(dones))
+        return batch
 
 
-class PriorityReplayBuffer:
+class PriorityReplayBuffer(ReplayBuffer):
     def __init__(self, size):
-        self._storage = []
-        self._maxsize = size
+        super().__init__(size)
         self._id = count()
-    
-    def __len__(self):
-        return len(self._storage)
     
     def add(self, trajectory, reward):
         if len(self._storage) < self._maxsize:
@@ -143,21 +122,12 @@ class PriorityReplayBuffer:
         if self._storage[0][0] < reward:
             heapq.heappop(self._storage)
             heapq.heappush(self._storage, (reward, next(self._id), trajectory))
-
-    def sample(self, batch_size):
-        coords, obses, n_completed, actions, rewards = [], [], [], [], []
-        coords_next, obses_next, n_completed_next, dones = [], [], [], []
-        total_transitions = sum(len(t) for t in self._storage)
-        probs = [len(t) / total_transitions for t in self._storage]
-        traj_idxs = np.random.choice(len(self._storage), batch_size, p=probs)
-        for i in traj_idxs:
-            idx = np.random.choice(len(self._storage[i][2]))
-            data = self._storage[i][2][idx]
-            add_transition(data, coords, obses, n_completed, actions, rewards, 
-                           coords_next, obses_next, n_completed_next, dones)
-        return (np.array(coords), np.array(obses), np.array(n_completed), 
-                np.array(actions), np.array(rewards), np.array(coords_next), 
-                np.array(obses_next), np.array(n_completed_next), np.array(dones))
+    
+    def _get_traj(self, traj_idx, transition_idx):
+        return self._storage[traj_idx][2][transition_idx]
+    
+    def _sample_transition_idx(self, traj_idx):
+        return np.random.choice(len(self._storage[traj_idx][2]))
 
 
 def collect_trajectories(n_trajs, agent, env, exp_replay, 
@@ -276,9 +246,9 @@ def evaluate(n_trajs, agent, env, max_steps=20, use_hints=True):
 def hints2tensor(hints, device=torch.device('cuda')):
     coords, obs, action = [], [], []
     for hint in hints:
-        coords.append(np.array(hint[0].coord))
-        obs.append(hint[0].obs)
-        action.append(np.array([hint[1]]))
+        coords.append(np.array(hint.coord))
+        obs.append(hint.obs)
+        action.append(np.array([hint.n_completed]))
     coords_t = torch.as_tensor(coords, device=device)
     obs_t = torch.as_tensor(obs, dtype=torch.long, device=device)
     action_t = torch.as_tensor(action, device=device)
