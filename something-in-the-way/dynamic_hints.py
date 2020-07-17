@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from IPython import display
 from functools import wraps
 
+from utils import plot_progress, polyak_update
+
 # ---------------------------------------------
 #         Traj collection + evaluation
 # ---------------------------------------------
@@ -189,18 +191,6 @@ def save_model(path: str, model_state_dict, epoch: int, reward: int) -> None:
         }, path)
 
 
-def plot_progress(loss_log, reward_log):
-    fig, axs = plt.subplots(1, 2, figsize=(15, 5))
-
-    axs[0].plot(loss_log)
-    axs[0].set_title('TD loss history')
-
-    axs[1].plot(reward_log)
-    axs[1].set_title('Mean reward per episode')
-
-    plt.show()
-
-
 def train_batch(agent,
                 target_network,
                 optimizer,
@@ -208,7 +198,8 @@ def train_batch(agent,
                 batch_size,
                 device,
                 zero_grad=True,
-                step=True):
+                step=True,
+                transitions=None):
     agent.train()
     if zero_grad:
         optimizer.zero_grad()
@@ -216,6 +207,9 @@ def train_batch(agent,
     coords, obs, n_completed, a, r, \
     next_coords, next_obs, next_n_completed, \
     is_done, hints = exp_replay.sample(batch_size, add_hint=True)
+
+    if transitions is not None:
+        transitions.append(coords)
 
     loss = compute_td_loss(coords,
                            obs,
@@ -231,9 +225,11 @@ def train_batch(agent,
                            target_network,
                            device=device)
     loss.backward()
+    grad_norm = nn.utils.clip_grad_norm_(agent.parameters(), 5)
     if step:
         optimizer.step()
-    return loss.item()
+    return loss.item(), grad_norm
+
 
 def ignore_keyboard_traceback(func):
     @wraps(func)
@@ -270,9 +266,16 @@ def train(n_epochs,
     agent.to(device)
     target_network.to(device)
 
+
+    env = make_env()
     loss_log = []
     reward_log = []
+    grad_norm_log = []
+    init_state_v_log = []
     best_seen_reward = min_reward_for_saving
+
+    transitions = []
+    priority_transitions = []
 
     for epoch in range(n_epochs + 1):
         agent.epsilon = epsilon.get_value(epoch)
@@ -282,23 +285,32 @@ def train(n_epochs,
         # loss
         agent.train()
         batch_loss = 0
+        batch_grad_norm = 0
+
         for _ in range(batches_per_epoch):
-            batch_loss += train_batch(agent,
-                                      target_network,
-                                      optimizer,
-                                      exp_replay,
-                                      batch_size,
-                                      device,
-                                      zero_grad=True,
-                                      step=False)
-            batch_loss += train_batch(agent,
-                                      target_network,
-                                      optimizer,
-                                      priority_exp_replay,
-                                      batch_size,
-                                      device,
-                                      zero_grad=False,
-                                      step=True)
+            loss, grad = train_batch(agent,
+                                     target_network,
+                                     optimizer,
+                                     exp_replay,
+                                     batch_size,
+                                     device,
+                                     zero_grad=True,
+                                     step=False,
+                                     transitions=transitions)
+            batch_loss += loss
+            batch_grad_norm = max(batch_grad_norm, grad)
+
+            loss, grad = train_batch(agent,
+                                     target_network,
+                                     optimizer,
+                                     priority_exp_replay,
+                                     batch_size,
+                                     device,
+                                     zero_grad=False,
+                                     step=True,
+                                     transitions=priority_transitions)
+            batch_loss += loss
+            batch_grad_norm = max(batch_grad_norm, grad)
 
         if (epoch + 1) % loss_log_freq == 0:
             batch_loss /= batches_per_epoch + priority_batches_per_epoch
@@ -307,21 +319,36 @@ def train(n_epochs,
             else:
                 loss_log.append(batch_loss)
 
+            s = env.reset()
+            h = env.get_hint(s, hint_type=agent.hint_type)
+            initial_state_v = np.max(agent.get_qvalues(s, h))
+            init_state_v_log.append(initial_state_v)
+            grad_norm_log.append(batch_grad_norm)
+            
+
+
         if (epoch + 1) % reward_log_freq == 0:
             eps = agent.epsilon
             agent.epsilon = 0
-            reward_log.append(evaluate(1, agent, make_env(), max_steps))
+            reward_log.append(evaluate(1, target_network, make_env(), max_steps))
             if best_seen_reward < reward_log[-1]:
                 best_seen_reward = reward_log[-1]
-                save_model(save_path, agent.state_dict(), epoch,
+                save_model(save_path, target_network.state_dict(), epoch,
                            best_seen_reward)
             agent.epsilon = eps
 
         if (epoch + 1) % plot_every == 0:
+            transitions = np.vstack(transitions)
+            priority_transitions = np.vstack(priority_transitions)
+            
             display.clear_output()
             print(f'Epoch #{epoch}')
-            plot_progress(loss_log, reward_log)
+            plot_progress(loss_log, reward_log, init_state_v_log, grad_norm_log, 
+                          transitions, priority_transitions, env._get_field_image())
+            transitions = []
+            priority_transitions = []
 
         if (epoch + 1) % refresh_target_network_freq == 0:
-            target_network.load_state_dict(agent.state_dict())
+            polyak_update(0.05, target_network, agent)
+            # target_network.load_state_dict(agent.state_dict())
     return reward_log
