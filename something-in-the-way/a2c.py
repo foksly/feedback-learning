@@ -49,7 +49,7 @@ class A2CAgent(nn.Module):
 
     def sample_actions(self, logps):
         actions = []
-        probs = torch.exp(logps).cpu().numpy()
+        probs = torch.exp(logps).detach().cpu().numpy()
         for p in probs:
             actions.append(np.random.choice(self.n_actions, p=p))
         return actions
@@ -88,18 +88,13 @@ class Runner:
     def __init__(self, n_agents, agent, make_env, max_steps=100, use_hint=False):
         self.n_agents = n_agents
         self.agent = agent
+        self.make_env = make_env
         self.env = make_env()
         self.envs = [make_env() for _ in range(n_agents)]
-        self.states = [env.reset() for env in self.envs]
-
         self.max_steps = max_steps
-        self.n_steps = [0 for _ in range(n_agents)]
-        self.use_hint = use_hint
 
-    def run(self):
-        self.agent.eval()
-        mb_states, mb_actions, mb_rewards, mb_next_states, mb_dones = [], [], [], [], []
 
+    def _compute_logps(self):
         with torch.no_grad():
             if self.use_hint:
                 hints = [
@@ -109,84 +104,120 @@ class Runner:
                 logps, _ = self.agent(self.states, hints)
             else:
                 logps, _ = self.agent(self.states)
+        return logps
 
-        mb_actions = self.agent.sample_actions(logps)
-        for i, env in enumerate(self.envs):
-            next_state, reward, done = env.step(mb_actions[i])
 
-            mb_states.append(self.states[i])
-            mb_rewards.append(reward)
-            mb_next_states.append(next_state)
-            mb_dones.append(done)
+    def run(self, n_steps=5):
+        self.agent.eval()
+        mb_states, mb_actions, mb_rewards, mb_next_states, mb_dones = [], [], [], [], []
 
-            if done or self.n_steps[i] == self.max_steps:
-                self.states[i] = env.reset()
-                self.n_steps[i] = 0
-            else:
-                self.states[i] = next_state
-                self.n_steps[i] += 1
+        for _ in range(n_steps):
+            rewards, next_states, dones = [], [], []
+
+            logps = self._compute_logps()
+            actions = self.agent.sample_actions(logps)
+            mb_states.append(self.states)
+            for i, env in enumerate(self.envs):
+                next_s, r, d = env.step(actions[i])
+                rewards.append(r)
+                next_states.append(next_s)
+                dones.append(dones)
+                if done or self.n_steps[i] == self.max_steps:
+                    self.states[i] = env.reset()
+                    self.n_steps[i] = 0
+                else:
+                    self.states[i] = next_s
+                    self.n_steps[i] += 1
+
+            mb_actions.append(actions)
+            mb_rewards.append(rewards)
+            mb_next_states.append(next_states)
+            mb_dones.append(dones)
             
         return mb_states, mb_actions, mb_rewards, mb_next_states, mb_dones
 
 
-def evaluate(agent, env, max_steps=100):
-    agent.eval()
+    def get_trajectories(self):
+        self.agent.eval()
 
-    s = env.reset()
-    total_reward = 0
-    n_steps = 0
-    done = False
-    while (not done and n_steps < max_steps):
-        a = agent.get_action(s, greedy=True)
-        next_s, r, done = env.step(a)
-        total_reward += r
-        s = next_s
-        n_steps += 1
-    return total_reward
+        envs = [self.make_env() for _ in range(self.n_agents)]
+        trajs = [[] for _ in range(self.n_agents)]
+        states = [env.reset() for env in envs]
+        dones = [False for _ in range(self.n_agents)]
+        n_steps = 0
+
+        while (n_steps < self.max_steps):
+            n_steps += 1
+            not_done_states = []
+            for i, done in enumerate(dones):
+                if not done:
+                    not_done_states.append(states[i])
+                
+            if len(not_done_states) == 0:
+                break
+                
+            with torch.no_grad():
+                logps, _ = self.agent(not_done_states)
+            
+            actions = self.agent.sample_actions(logps)
+            idx = 0
+            for i, done in enumerate(dones):
+                if not done:
+                    next_s, r, done = envs[i].step(actions[idx])
+                    trajs[i].append([states[i], actions[idx], r, next_s, done])
+                    dones[i] = done
+                    states[i] = next_s
+                    idx += 1
+                    
+
+        return trajs
 
 
-def compute_loss(states,
-                 actions,
-                 rewards,
-                 next_states,
-                 dones,
-                 agent,
-                 env,
-                 gamma=0.99,
-                 use_hints=False,
-                 entropy_term_strength=0.02,
-                 device=torch.device('cuda')):
+def compute_trajectory_loss(trajectory, agent, env, 
+                            gamma=0.99, entropy_term_strength=0.02, 
+                            device=torch.device('cuda')):
+    states, actions, rewards, _, _ = map(list, zip(*trajectory))
     actions = torch.as_tensor(actions, device=device, dtype=torch.long)
     rewards = torch.as_tensor(rewards, device=device, dtype=torch.float)
-
-    is_done = torch.as_tensor(np.array(dones, dtype=np.float32),
-                                       device=device, dtype=torch.float)
-    is_not_done = 1 - is_done
     
-    if use_hints:
-        hints = [   
-            env.get_hint(state, hint_type=agent.hint_type) for state in states
-        ]
-        next_hints = [
-            env.get_hint(state, hint_type=agent.hint_type)
-            for state in next_states
-        ]
+    logps, values = agent(states)
+    td_target = 0.
+    np_values = values.view(-1).cpu().detach().numpy()
+    td_targets = np.zeros(len(trajectory))
+    advantages = np.zeros(len(trajectory))
 
-    logps, values = agent(states, hints) if use_hints else agent(states)
-    _, next_values = agent(next_states,
-                           next_hints) if use_hints else agent(states)
-
-    td_target = rewards + gamma * (next_values.squeeze() * is_not_done)
-    advantage = td_target - values
+    for i in range(len(trajectory) - 1, -1, -1):
+        td_target = rewards[i] + gamma * td_target
+        advantage = td_target - np_values[i]
+        td_targets[i] = td_target
+        advantages[i] = advantage
 
     chosen_action_log_probs = logps.gather(1, actions.view(-1, 1))
-    policy_loss = -torch.sum(chosen_action_log_probs * advantage.detach())
+    
+    advantages_tensor = torch.as_tensor(advantages, device=device)
+    policy_loss = -torch.sum(chosen_action_log_probs.squeeze() * advantages_tensor)
+    
+    td_targets_tensor = torch.as_tensor(td_targets, device=device)
+    value_loss = torch.sum(torch.pow(td_targets_tensor - values.squeeze(), 2))
 
-    value_loss = torch.sum(torch.pow(td_target.detach() - values, 2)) # ?
-
-    entropy_loss = torch.sum(-logps * torch.exp(logps))
+    entropy_loss = -torch.sum(logps * torch.exp(logps))
 
     return policy_loss + 0.5 * value_loss - entropy_term_strength * entropy_loss
+
+
+def compute_loss(trajectories, agent, env, 
+                 gamma=0.99, entropy_term_strength=0.02, 
+                 device=torch.device('cuda')):
+    loss = None
+    for trajectory in trajectories:
+        if loss is None:
+            loss = compute_trajectory_loss(trajectory, agent, env, gamma, 
+                                           entropy_term_strength, device)
+        else:
+            loss += compute_trajectory_loss(trajectory, agent, env, gamma, 
+                                            entropy_term_strength, device)
+    return loss / len(trajectories)
+
 
 def plot_progress(loss_log, reward_log):
     _, axs = plt.subplots(1, 2, figsize=(15, 5))
@@ -216,21 +247,24 @@ def train(n_epochs,
     reward_log = []
     
     for epoch in range(n_epochs):
-        states, actions, rewards, next_states, dones = runner.run()
+        trajectories = runner.get_trajectories()
         
         agent.train()
         optimizer.zero_grad()
-        loss = compute_loss(states, actions, rewards, next_states, dones, agent, env)
+        loss = compute_loss(trajectories, agent, env, device=device)
         loss_log.append(loss.item())
 
         loss.backward()
         optimizer.step()
             
         if (epoch + 1) % reward_log_freq == 0:
-            reward_log.append(evaluate(agent, make_env(), max_steps))
+            trajs_rewards = []
+            for trajectory in trajectories:
+                _, _, rewards, _, _ = map(list, zip(*trajectory))
+                trajs_rewards.append(sum(rewards))
+            reward_log.append(np.mean(trajs_rewards))
         
         if (epoch + 1) % plot_every == 0:
             display.clear_output()
             print(f'Epoch #{epoch + 1}')
             plot_progress(loss_log, reward_log)
-
