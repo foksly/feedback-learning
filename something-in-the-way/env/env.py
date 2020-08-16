@@ -71,7 +71,7 @@ class Environment:
 
         self.hints = field_config['hints']
 
-        self.index2action = {0: 'U', 1: 'D', 2: 'L', 3: 'R'}
+        self.index2action = {0: 'U', 1: 'D', 2: 'R'}
         self.action2index = {v: k for k, v in self.index2action.items()}
 
     def step(self, action):
@@ -89,21 +89,38 @@ class Environment:
         return State(self.agent_position, 
                      self._get_receptive_field(self.agent_position), 
                      self.reward.completed_bridges), reward_for_step, is_done
+    
+
+    def get_current_state(self):
+        return State(self.agent_position, 
+                     self._get_receptive_field(self.agent_position),
+                     self.reward.completed_bridges)
                 
     def get_hint(self, state, hint_type):
+        # self.action2index = {'U': 0, 'D': 1, 'R': 2}
         if hint_type == 'next_direction':
-            direction2int = {'U': 0, 'D': 1, 'R': 2}
             if state.n_completed < len(self.hints):
-                closest_reward_x = self.hints[state.n_completed][0][0]
+                for hint in self.hints[state.n_completed]:
+                    if (hint[0], hint[1]) == state.coord:
+                        return self.action2index[hint[2]]
+                target_x = self.hints[state.n_completed][0][0]
             else:
-                closest_reward_x = self.goal_position.x
+                target_x = self.goal_position.x
             
-            if state.coord.x == closest_reward_x:
-                return direction2int['R']
-            elif state.coord.x < closest_reward_x:
-                return direction2int['D']
+            if state.coord.x == target_x:
+                return self.action2index['R']
+            elif state.coord.x < target_x:
+                return self.action2index['D']
             else:
-                return direction2int['U']
+                return self.action2index['U']
+
+        if hint_type == 'next_direction_on_bridge':
+            no_hint_token = 3
+            for hint in self.hints[state.n_completed]:
+                if (hint[0], hint[1]) == state.coord:
+                    return self.action2index[hint[2]]
+            return no_hint_token
+            
 
 
     def get_static_hint(self):
@@ -124,7 +141,8 @@ class Environment:
                      self._get_receptive_field(self.agent_position), 
                      self.reward.completed_bridges)
 
-    def render(self, show_padding=False):
+
+    def _get_field_image(self):
         field_img = np.zeros((*self.field.shape, 3))
         for i in range(self.field.shape[0]):
             for j in range(self.field.shape[1]):
@@ -134,29 +152,29 @@ class Environment:
                     field_img[i][j] = self.WALL_COLOR
                 elif (i, j) == self.goal_position:
                     field_img[i][j] = self.GOAL_COLOR
-                elif (i, j) == self.agent_position:
-                    field_img[i][j] = self.AGENT_COLOR
                 elif self.field[i][j] in self.value['bridges']:
                     field_img[i][j] = self.BRIDGE_COLOR
-        
+        return field_img
+
+
+    def render(self, show_padding=False):
+        field_img = self._get_field_image()
+        field_img[self.agent_position[0]][self.agent_position[1]] = self.AGENT_COLOR
         if not show_padding:
             field_img = field_img[self.padding_size:-self.padding_size, 
                                   self.padding_size:-self.padding_size, :]
         plt.imshow(field_img.astype(np.int))
-    
+        return field_img
+
+
     def _get_next_position(self, position: Position, action: str) -> Position:
+        assert action in {'U', 'D', 'R'}
+
         if (action == 'U' and position.x > 0):
             next_position = Position(position.x - 1, position.y)
             if self.field[next_position.x][next_position.y] != self.value['wall']:
                 return next_position
             return position
-        
-        elif (action == 'L' and position.y > 0):
-            next_position = Position(position.x, position.y - 1)
-            if self.field[next_position.x][next_position.y] != self.value['wall']:
-                return next_position
-            return position
-        
         elif (action == 'D' and position.x < self.height - 1):
             next_position = Position(position.x + 1, position.y)
             if self.field[next_position.x][next_position.y] != self.value['wall']:
@@ -184,3 +202,11 @@ class Environment:
                 = self.agent_value + self.reward.completed_bridges
 
         return receptive_field
+
+
+class EnvFactory:
+    def __init__(self, config):
+        self.config = config
+    
+    def __call__(self):
+        return Environment(self.config, add_agent_value=False)
