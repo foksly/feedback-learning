@@ -19,7 +19,7 @@ class A2CAgent(nn.Module):
                  hint_type=None,
                  hint_config=None,
                  receptive_field=3,
-                 n_actions=3,
+                 n_actions=4,
                  epsilon=0.1):
         super().__init__()
         self.n_actions = n_actions
@@ -136,6 +136,7 @@ def compute_trajectory_loss(trajectory,
                             entropy_term_strength=0.02,
                             device=torch.device('cuda')):
     data = list(map(list, zip(*trajectory)))
+    # states, actions, rewards, _, _ = map(list, zip(*trajectory))
     states, actions, rewards = data[:3]
     hints = data[-1] if hint_type is not None else None
         
@@ -231,6 +232,9 @@ def train(n_epochs,
           plot_every=100):
     
     env = make_env()
+    # field_img = env.render()
+    # field_img = field_img.reshape((1, *field_img.shape))
+    # field_img = np.transpose(field_img, (0, 3, 1, 2))
 
     agent.to(device)
     env = make_env()

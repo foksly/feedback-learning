@@ -71,7 +71,7 @@ class Environment:
 
         self.hints = field_config['hints']
 
-        self.index2action = {0: 'U', 1: 'D', 2: 'R'}
+        self.index2action = {0: 'U', 1: 'D', 2: 'R', 3: 'L'}
         self.action2index = {v: k for k, v in self.index2action.items()}
 
     def step(self, action):
@@ -168,7 +168,7 @@ class Environment:
 
 
     def _get_next_position(self, position: Position, action: str) -> Position:
-        assert action in {'U', 'D', 'R'}
+        assert action in {'U', 'D', 'R', 'L'}
 
         if (action == 'U' and position.x > 0):
             next_position = Position(position.x - 1, position.y)
@@ -177,6 +177,11 @@ class Environment:
             return position
         elif (action == 'D' and position.x < self.height - 1):
             next_position = Position(position.x + 1, position.y)
+            if self.field[next_position.x][next_position.y] != self.value['wall']:
+                return next_position
+            return position
+        elif (action == 'L' and position.y > 0):
+            next_position = Position(position.x, position.y - 1)
             if self.field[next_position.x][next_position.y] != self.value['wall']:
                 return next_position
             return position
