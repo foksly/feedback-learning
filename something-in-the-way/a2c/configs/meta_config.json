@@ -7,17 +7,24 @@
         "completed_emb_dim": 4
     },
     "hint": {
-        "hint_values_range": 4,
+        "hint_values_range": 3,
         "embedding_dim": 4
     },
     "n_actions": 4,
+    "train_configs": {
+        "path": "/home/foksly/Documents/road-to-nips/something-in-the-way/configs/meta_20x2/train",
+        "size": 10
+    },
+    "test_configs": {
+        "path": "/home/foksly/Documents/road-to-nips/something-in-the-way/configs/meta_20x2/test"
+    },
     "train": {
         "reward_log_freq": 1,
         "valid_reward_log_freq": 10,
         "lr": 0.0001,
         "device": "cuda",
         "max_steps": 70,
-        "epochs": 10000,
+        "epochs": 3000,
         "n_agents": 16,
         "max_reward_limit": 10,
         "checkpoints_dir": "/home/foksly/Documents/road-to-nips/something-in-the-way/a2c/checkpoints/",

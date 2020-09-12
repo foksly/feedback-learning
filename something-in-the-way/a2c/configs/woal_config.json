@@ -7,10 +7,10 @@
         "completed_emb_dim": 4
     },
     "hint": {
-        "hint_values_range": 4,
+        "hint_values_range": 3,
         "embedding_dim": 4
     },
-    "n_actions": 4,
+    "n_actions": 3,
     "train": {
         "reward_log_freq": 1,
         "valid_reward_log_freq": 10,
