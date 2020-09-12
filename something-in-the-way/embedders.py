@@ -80,6 +80,8 @@ class HintEncoder(nn.Module):
         super().__init__()
         if hint_type in {'next_direction', 'next_direction_on_bridge'}:
             self.encoder = NextDirectionHintEncoder(hint_kwargs)
+        elif hint_type in {'attn_on_coords'}:
+            self.encoder = CoordinatesAttentionHintEncoder(hint_kwargs)
 
         self.hint_dim = self.encoder.hint_dim
 
@@ -112,6 +114,20 @@ class CoordinatesAttentionHintEncoder(nn.Module):
         self.encode_x = nn.Embedding(hint_kwargs['hint_values_range'], hint_kwargs['embedding_dim'])
         self.encode_y = nn.Embedding(hint_kwargs['hint_values_range'], hint_kwargs['embedding_dim'])
         self.hint_dim = hint_kwargs['embedding_dim']
-    
+
+
     def forward(self, hint):
-        pass
+        hint_t = self.to_tensor(hint)
+        x_enc = self.encode_x(hint_t[:, 0])
+        y_enc = self.encode_y(hint_t[:, 1])
+        return torch.cat([x_enc, y_enc], dim=1)
+
+
+    def to_tensor(self, hint):
+        '''
+        hint example: [(2, 3, 'R')]
+        '''
+        device = next(self.parameters()).device
+        hint = [[h[0], h[1]] for h in hint]
+        hint_t = torch.as_tensor(hint, device=device)
+        return hint_t

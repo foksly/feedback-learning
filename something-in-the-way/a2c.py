@@ -7,79 +7,11 @@ from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
 from embedders import StateEncoder, HintEncoder
+from a2c_agents import A2CAgent
 from utils import ignore_keyboard_traceback, save_model
 
 import matplotlib.pyplot as plt
 from IPython import display
-
-
-class A2CAgent(nn.Module):
-    def __init__(self,
-                 state_config,
-                 hint_type=None,
-                 hint_config=None,
-                 receptive_field=3,
-                 n_actions=4,
-                 epsilon=0.1):
-        super().__init__()
-        self.n_actions = n_actions
-        self.hint_type = hint_type
-
-        self.state_encoder = StateEncoder(state_config,
-                                          receptive_field=receptive_field)
-        hint_dim = 0
-        if hint_type is not None:
-            self.hint_encoder = HintEncoder(hint_type,
-                                            hint_config)  # code hint type
-            hint_dim = self.hint_encoder.hint_dim
-
-        self.backbone = nn.Sequential(
-            nn.Linear(self.state_encoder.state_dim + hint_dim, 512),
-            nn.LeakyReLU(), nn.Linear(512, 256), nn.LeakyReLU(),
-            nn.Linear(256, 128), nn.LeakyReLU())
-        self.policy_head = nn.Sequential(nn.Linear(128, 64), nn.ELU(),
-                                         nn.Linear(64, n_actions))
-        self.value_head = nn.Sequential(nn.Linear(128, 64), nn.ELU(),
-                                        nn.Linear(64, 1))
-
-    def forward(self, states, hint=None):
-        backbone_input = self.state_encoder(states)
-        if hint is not None:
-            hint_enc = self.hint_encoder(hint)
-            backbone_input = torch.cat([backbone_input, hint_enc], dim=1)  #
-
-        backbone = self.backbone(backbone_input)
-        logps = F.log_softmax(self.policy_head(backbone), -1)
-        values = self.value_head(backbone)
-        return logps, values
-
-    def sample_actions(self, logps):
-        actions = []
-        probs = torch.exp(logps).detach().cpu().numpy()
-        for p in probs:
-            actions.append(np.random.choice(self.n_actions, p=p))
-        return actions
-
-    def get_action(self, state, greedy=False):
-        with torch.no_grad():
-            logps, _ = self.forward(state)
-        probs = torch.exp(logps).squeeze().cpu().numpy()
-        if greedy:
-            return np.argmax(probs)
-        return np.random.choice(self.n_actions, p=probs)
-
-    def to_tensor(self, state):
-        device = next(self.parameters()).device
-        if isinstance(state, list):
-            coord, obs, n_completed = state.coord, state.obs, state.n_completed
-        else:
-            coord, obs, n_completed = [state.coord], [state.obs
-                                                      ], [state.n_completed]
-
-        coord_t = torch.as_tensor(coord, device=device)
-        obs_t = torch.as_tensor(obs, dtype=torch.long, device=device)
-        n_completed_t = torch.as_tensor(n_completed, device=device)
-        return coord_t, obs_t, n_completed_t
 
 
 def get_trajectories(n_agents, agent, make_env, max_steps=100, hint_type=None):
