@@ -29,12 +29,11 @@ class A2CAgent(nn.Module):
                                           receptive_field=receptive_field)
         hint_dim = 0
         if hint_type is not None:
-            self.hint_encoder = HintEncoder(hint_type,
-                                            hint_config)  # code hint type
-            hint_dim = self.hint_encoder.hint_dim
+            self.hint_encoder = HintEncoder(hint_type, hint_config)
+            hint_dim = self.hint_encoder.dim
 
         self.backbone = nn.Sequential(
-            nn.Linear(self.state_encoder.state_dim + hint_dim, 512),
+            nn.Linear(self.state_encoder.dim + hint_dim, 512),
             nn.LeakyReLU(), nn.Linear(512, 256), nn.LeakyReLU(),
             nn.Linear(256, 128), nn.LeakyReLU())
         self.policy_head = nn.Sequential(nn.Linear(128, 64), nn.ELU(),
@@ -89,9 +88,11 @@ class Attention(nn.Module):
 
         compute_scores = getattr(self, self.attn_type + '_attn')
         scores = compute_scores(state_projected, hints_projected)
-        attn_weights = F.softmax(scores, dim=1)
-        output = (hints_emb * attn_weights.unsqueeze(2)).sum(1)
-        return attn_weights, output
+        if len(scores.shape) == 1:
+            scores = scores.unsqueeze(0)
+        self.attn_weights = F.softmax(scores, dim=1)
+        output = (hints_emb * self.attn_weights.unsqueeze(2)).sum(1)
+        return output
 
     
     def cosine_attn(self, state_projected, hints_projected):
@@ -110,7 +111,7 @@ class Attention(nn.Module):
         concatenation = torch.cat([repeated_state, hints_projected], dim=2)
         scores = self.v(torch.tanh(self.attn(concatenation))).squeeze()
         return scores
-    
+
     def additive_attn(self, state_projected, hints_projected):
         return self.attn(torch.tanh(state_projected.unsqueeze(1) + hints_projected)).squeeze()
 
@@ -119,37 +120,42 @@ class Attention(nn.Module):
 class A2CAttnAgent(nn.Module):
     def __init__(self,
                  state_config,
-                 hint_type=None,
-                 hint_config=None,
+                 hint_type,
+                 hint_config,
+                 attn_dim,
+                 attn_type='cosine',
                  receptive_field=3,
                  n_actions=4,
                  epsilon=0.1):
+        """
+        Hint types:
+        'full_trajectory'
+        """
         super().__init__()
         self.n_actions = n_actions
         self.hint_type = hint_type
 
-        self.state_encoder = StateEncoder(state_config,
-                                          receptive_field=receptive_field)
-        hint_dim = 0
-        if hint_type is not None:
-            self.hint_encoder = HintEncoder(hint_type,
-                                            hint_config)  # code hint type
-            hint_dim = self.hint_encoder.hint_dim
+        self.state_encoder = StateEncoder(state_config, receptive_field=receptive_field)
+        self.hint_encoder = HintEncoder(hint_type, hint_config)
+        self.attn_dim = attn_dim
 
+        self.attn = Attention(self.state_encoder.dim, self.hint_encoder.dim, attn_dim, attn_type=attn_type)
         self.backbone = nn.Sequential(
-            nn.Linear(self.state_encoder.state_dim + hint_dim, 512),
+            nn.Linear(self.state_encoder.dim + attn_dim, 512),
             nn.LeakyReLU(), nn.Linear(512, 256), nn.LeakyReLU(),
-            nn.Linear(256, 128), nn.LeakyReLU())
+            nn.Linear(256, 128), nn.LeakyReLU()
+        )
         self.policy_head = nn.Sequential(nn.Linear(128, 64), nn.ELU(),
                                          nn.Linear(64, n_actions))
         self.value_head = nn.Sequential(nn.Linear(128, 64), nn.ELU(),
                                         nn.Linear(64, 1))
 
-    def forward(self, states, hint=None):
-        backbone_input = self.state_encoder(states)
-        if hint is not None:
-            hint_enc = self.hint_encoder(hint)
-            backbone_input = torch.cat([backbone_input, hint_enc], dim=1)
+    def forward(self, states, hints):
+        states_enc = self.state_encoder(states)
+        hints_enc = self.hint_encoder(hints)
+
+        weighted_hints = self.attn(states_enc, hints_enc)
+        backbone_input = torch.cat([states_enc, weighted_hints], dim=1)
 
         backbone = self.backbone(backbone_input)
         logps = F.log_softmax(self.policy_head(backbone), -1)

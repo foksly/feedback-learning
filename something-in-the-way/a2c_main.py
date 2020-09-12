@@ -10,7 +10,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from env import Environment, EnvFactory
-from a2c import A2CAgent, train
+from a2c import train
+from a2c_agents import A2CAgent, A2CAttnAgent
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--runs', type=int, default=1, help='Number of runs of the experiment')
     parser.add_argument('--experiment-prefix', default='', help='Prefix for the experiment name')
     parser.add_argument('--experiment-config', 
-                        default='/home/foksly/Documents/road-to-nips/something-in-the-way/a2c/configs/default_config.json',
+                        default='/home/foksly/Documents/road-to-nips/feedback-learning/something-in-the-way/a2c/configs/default_config.json',
                         help='Experiment config')
     parser.add_argument('--logdir', help='Where to save logs')
     return parser.parse_args()
@@ -108,10 +109,16 @@ def main():
         if args.hint_type is None:
             agent = A2CAgent(experiment_config['state'], n_actions=experiment_config['n_actions'],
                              receptive_field=env.receptive_field_size).to(device)
-        else:
+        elif args.hint_type.startswith('next_direction'):
             agent = A2CAgent(experiment_config['state'], n_actions=experiment_config['n_actions'],
                              hint_type=args.hint_type, hint_config=experiment_config['hint'], 
                              receptive_field=env.receptive_field_size).to(device)
+        elif args.hint_type.startswith('attn'):
+            agent = A2CAttnAgent(experiment_config['state'], n_actions=experiment_config['n_actions'],
+                                 hint_type=args.hint_type, hint_config=experiment_config['hint'],
+                                 attn_dim=experiment_config['attn_dim'], attn_type=experiment_config['attn_type'],
+                                 receptive_field=env.receptive_field_size).to(device)
+
 
         optimizer = torch.optim.Adam(agent.parameters(), lr=experiment_config['train']['lr'])
         log = train(train_params['epochs'], 

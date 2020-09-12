@@ -12,7 +12,7 @@ class StateEncoder(nn.Module):
         self.y_coord_embedder = nn.Embedding(state_kwargs['coord_range'], state_kwargs['coord_emb_dim'])
         self.field_embedder = nn.Embedding(state_kwargs['field_values_range'], state_kwargs['field_emb_dim'])
         self.completed_bridges_embedder = nn.Embedding(state_kwargs['n_completed'] + 1, state_kwargs['completed_emb_dim'])
-        self.state_dim = 2 * state_kwargs['coord_emb_dim'] + receptive_field * receptive_field * state_kwargs['field_emb_dim'] + \
+        self.dim = 2 * state_kwargs['coord_emb_dim'] + receptive_field * receptive_field * state_kwargs['field_emb_dim'] + \
                          state_kwargs['completed_emb_dim']
 
     def forward(self, states):
@@ -80,10 +80,10 @@ class HintEncoder(nn.Module):
         super().__init__()
         if hint_type in {'next_direction', 'next_direction_on_bridge'}:
             self.encoder = NextDirectionHintEncoder(hint_kwargs)
-        elif hint_type in {'attn_on_coords'}:
+        elif hint_type in {'attn'}:
             self.encoder = CoordinatesAttentionHintEncoder(hint_kwargs)
 
-        self.hint_dim = self.encoder.hint_dim
+        self.dim = self.encoder.dim
 
     def forward(self, hint):
         return self.encoder(hint)
@@ -93,7 +93,7 @@ class NextDirectionHintEncoder(nn.Module):
     def __init__(self, hint_kwargs):
         super().__init__()
         self.encode = nn.Embedding(hint_kwargs['hint_values_range'], hint_kwargs['embedding_dim'])
-        self.hint_dim = hint_kwargs['embedding_dim']
+        self.dim = hint_kwargs['embedding_dim']
 
     def forward(self, hint):
         hint_t = self.to_tensor(hint)
@@ -113,8 +113,7 @@ class CoordinatesAttentionHintEncoder(nn.Module):
         super().__init__()
         self.encode_x = nn.Embedding(hint_kwargs['hint_values_range'], hint_kwargs['embedding_dim'])
         self.encode_y = nn.Embedding(hint_kwargs['hint_values_range'], hint_kwargs['embedding_dim'])
-        self.hint_dim = hint_kwargs['embedding_dim']
-
+        self.dim = hint_kwargs['embedding_dim'] * 2
 
     def forward(self, hint):
         hint_t = self.to_tensor(hint)
@@ -122,12 +121,17 @@ class CoordinatesAttentionHintEncoder(nn.Module):
         y_enc = self.encode_y(hint_t[:, 1])
         return torch.cat([x_enc, y_enc], dim=1)
 
-
-    def to_tensor(self, hint):
+    def to_tensor(self, hints):
         '''
         hint example: [(2, 3, 'R')]
         '''
         device = next(self.parameters()).device
-        hint = [[h[0], h[1]] for h in hint]
-        hint_t = torch.as_tensor(hint, device=device)
-        return hint_t
+        if not isinstance(hints, list):
+            hints = [hints]
+        
+        coords = []
+        for hint in hints:
+            coords.append(hint.coord)
+        
+        coord_t = torch.as_tensor(coords, device=device)
+        return coord_t
