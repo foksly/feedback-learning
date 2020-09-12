@@ -8,10 +8,11 @@ class StateEncoder(nn.Module):
     def __init__(self, state_kwargs, receptive_field=3):
         super().__init__()
         self.n_cols = state_kwargs['n_cols'] # number of field columns
-        self.coord_embedding = nn.Embedding(state_kwargs['coord_range'], state_kwargs['coord_emb_dim'])
-        self.field_embedding = nn.Embedding(state_kwargs['field_values_range'], state_kwargs['field_emb_dim'])
-        self.completed_bridges_embedding = nn.Embedding(state_kwargs['n_completed'] + 1, state_kwargs['completed_emb_dim'])
-        self.state_dim = state_kwargs['coord_emb_dim'] + receptive_field * receptive_field * state_kwargs['field_emb_dim'] + \
+        self.x_coord_embedder = nn.Embedding(state_kwargs['coord_range'], state_kwargs['coord_emb_dim'])
+        self.y_coord_embedder = nn.Embedding(state_kwargs['coord_range'], state_kwargs['coord_emb_dim'])
+        self.field_embedder = nn.Embedding(state_kwargs['field_values_range'], state_kwargs['field_emb_dim'])
+        self.completed_bridges_embedder = nn.Embedding(state_kwargs['n_completed'] + 1, state_kwargs['completed_emb_dim'])
+        self.state_dim = 2 * state_kwargs['coord_emb_dim'] + receptive_field * receptive_field * state_kwargs['field_emb_dim'] + \
                          state_kwargs['completed_emb_dim']
 
     def forward(self, states):
@@ -28,14 +29,17 @@ class StateEncoder(nn.Module):
         coords, obs, n_completed = self.to_tensor(states)
 
         batch_size = coords.shape[0]
-        coords = coords[:, 0] * self.n_cols + coords[:, 1]
-        coords_emb = self.coord_embedding(coords).view(batch_size, -1)
-        field_emb = self.field_embedding(obs.view(batch_size,-1)) \
+        # coords = coords[:, 0] * self.n_cols + coords[:, 1]
+
+        x_coord_emb = self.x_coord_embedder(coords[:, 0]).view(batch_size, -1)
+        y_coord_emb = self.y_coord_embedder(coords[:, 1]).view(batch_size, -1)
+
+        field_emb = self.field_embedder(obs.view(batch_size,-1)) \
                         .view(batch_size, -1)
-        
-        completed_bridges_emb = self.completed_bridges_embedding(n_completed) \
+
+        completed_bridges_emb = self.completed_bridges_embedder(n_completed) \
                                     .view(batch_size, -1)
-        return torch.cat([coords_emb, field_emb, completed_bridges_emb], dim=1)
+        return torch.cat([x_coord_emb, y_coord_emb, field_emb, completed_bridges_emb], dim=1)
 
     def to_tensor(self, states):
         """
@@ -100,3 +104,14 @@ class NextDirectionHintEncoder(nn.Module):
             hint = [hint]
         hint_t = torch.as_tensor(hint, device=device)
         return hint_t
+
+
+class CoordinatesAttentionHintEncoder(nn.Module):
+    def __init__(self, hint_kwargs):
+        super().__init__()
+        self.encode_x = nn.Embedding(hint_kwargs['hint_values_range'], hint_kwargs['embedding_dim'])
+        self.encode_y = nn.Embedding(hint_kwargs['hint_values_range'], hint_kwargs['embedding_dim'])
+        self.hint_dim = hint_kwargs['embedding_dim']
+    
+    def forward(self, hint):
+        pass
