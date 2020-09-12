@@ -15,9 +15,9 @@ from torch import nn
 # ---------------------------------------------
 
 def add_transition(transition, coords, obses, n_completed, actions, rewards,
-                   coords_next, obses_next, n_completed_next, dones, hints):
+                   coords_next, obses_next, n_completed_next, dones, hints, next_hints):
     if hints is not None:
-        state, action, reward, state_next, done, hint = transition
+        state, action, reward, state_next, done, hint, next_hint = transition
     else:
         state, action, reward, state_next, done = transition
 
@@ -32,7 +32,7 @@ def add_transition(transition, coords, obses, n_completed, actions, rewards,
     dones.append(done)
     if hints is not None:
         hints.append(hint)
-
+        next_hints.append(next_hint)
 
 class ReplayBuffer(object):
     def __init__(self, size):
@@ -47,7 +47,7 @@ class ReplayBuffer(object):
         self._maxsize = size
         self._next_idx = 0
     
-    def _get_traj(self, traj_idx, transition_idx):
+    def _get_transition(self, traj_idx, transition_idx):
         return self._storage[traj_idx][transition_idx]
 
     def _sample_transition_idx(self, traj_idx):
@@ -90,16 +90,16 @@ class ReplayBuffer(object):
         """
         coords, obses, n_completed, actions, rewards = [], [], [], [], []
         coords_next, obses_next, n_completed_next, dones = [], [], [], []
-        hints = [] if add_hint else None
+        hints, next_hints = ([], []) if add_hint else (None, None)
 
         total_transitions = sum(len(t) for t in self._storage)
         probs = [len(t) / total_transitions for t in self._storage]
         traj_idxs = np.random.choice(len(self._storage), batch_size, p=probs)
         for i in traj_idxs:
             idx = self._sample_transition_idx(i)
-            data = self._get_traj(i, idx)
+            data = self._get_transition(i, idx)
             add_transition(data, coords, obses, n_completed, actions, rewards, 
-                           coords_next, obses_next, n_completed_next, dones, hints)
+                           coords_next, obses_next, n_completed_next, dones, hints, next_hints)
 
         batch = [np.array(coords), np.array(obses), np.array(n_completed), 
                 np.array(actions), np.array(rewards), np.array(coords_next), 
@@ -107,6 +107,7 @@ class ReplayBuffer(object):
         
         if hints is not None:
             batch.append(hints)
+            batch.append(next_hints)
 
         return batch
 
@@ -123,7 +124,7 @@ class PriorityReplayBuffer(ReplayBuffer):
             heapq.heappop(self._storage)
             heapq.heappush(self._storage, (reward, next(self._id), trajectory))
     
-    def _get_traj(self, traj_idx, transition_idx):
+    def _get_transition(self, traj_idx, transition_idx):
         return self._storage[traj_idx][2][transition_idx]
     
     def _sample_transition_idx(self, traj_idx):
@@ -330,20 +331,60 @@ def compute_td_loss(coords,
     return loss
 
 
-def plot_progress(loss_log, reward_log):
-    fig, axs = plt.subplots(1, 2, figsize=(15, 5))
+def plot_transitions(axs, transitions, field):
+    init_color = np.array([0, 0, 90])
+    addition = np.array([0, 0, 1])
+    for transition in transitions:
+        if np.sum(field[transition[0]][transition[1]]) == 0:
+            field[transition[0]][transition[1]] = init_color
+        elif field[transition[0]][transition[1]][2] < 250:
+            field[transition[0]][transition[1]] += addition
+    axs.imshow(field.astype(np.int))
 
-    axs[0].plot(loss_log)
-    axs[0].set_title('TD loss history')
 
-    axs[1].plot(reward_log)
-    axs[1].set_title('Mean reward per episode')
+def plot_progress(loss_log, reward_log, initial_state_v, grad_norm, 
+                  transitions=None, priority_transitons=None, field=None):
+    if transitions is not None:
+        assert priority_transitons is not None and field is not None
 
+        fig = plt.figure(constrained_layout=True)
+        gs = fig.add_gridspec(4, 2)
+    else:
+        fig = plt.figure(constrained_layout=True)
+        gs = fig.add_gridspec(2, 2)
+
+    td_loss_plot = fig.add_subplot(gs[0, 0])
+    td_loss_plot.plot(loss_log)
+    td_loss_plot.set_title('TD loss history', fontsize=18)
+
+    reward_plot = fig.add_subplot(gs[0, 1])
+    reward_plot.plot(reward_log)
+    reward_plot.set_title('Mean reward per episode', fontsize=18)
+
+    init_state_v_plot = fig.add_subplot(gs[1, 0])
+    init_state_v_plot.plot(initial_state_v)
+    init_state_v_plot.set_title('Initial state V', fontsize=18)
+
+    grad_norm_plot = fig.add_subplot(gs[1, 1])
+    grad_norm_plot.plot(grad_norm)
+    grad_norm_plot.set_title('Grad norm', fontsize=18)
+
+    if transitions is not None:
+        transition_plot = fig.add_subplot(gs[2, :])
+        plot_transitions(transition_plot, transitions, field)
+        transition_plot.set_title('Transitions sampled form experience replay', fontsize=18)
+
+        priority_transitons_plot = fig.add_subplot(gs[3, :])
+        plot_transitions(priority_transitons_plot, priority_transitons, field)
+        priority_transitons_plot.set_title('Transitions sampled from prioritized experience replay', fontsize=18)
+
+
+    # plt.tight_layout()
     plt.show()
 
 
 def save_model(path: str, model_state_dict,
-               epoch: int, reward: int) -> None:
+               epoch: int) -> None:
     """
     Saves model
     :param path: path where to save model
@@ -352,7 +393,6 @@ def save_model(path: str, model_state_dict,
         {
             'model_state_dict': model_state_dict,
             'epoch': epoch,
-            'reward': reward
         }, path)
 
 
@@ -437,7 +477,7 @@ def train(n_epochs,
             reward_log.append(evaluate(10, agent, env, max_steps, use_hints=use_hints))
             if best_seen_reward < reward_log[-1]:
                 best_seen_reward = reward_log[-1]
-                save_model(save_path, agent.state_dict(), epoch, best_seen_reward)
+                save_model(save_path, agent.state_dict(), epoch)
 
         if epoch % plot_every == 0:
             display.clear_output()
@@ -522,7 +562,7 @@ def train_sync(n_epochs,
             reward_log.append(evaluate(1, agent, make_env(), max_steps, use_hints=use_hints))
             if best_seen_reward < reward_log[-1]:
                 best_seen_reward = reward_log[-1]
-                save_model(save_path, agent.state_dict(), epoch, best_seen_reward)
+                save_model(save_path, agent.state_dict(), epoch)
 
         if epoch % plot_every == 0:
             display.clear_output()
@@ -533,13 +573,22 @@ def train_sync(n_epochs,
             target_network.load_state_dict(agent.state_dict())
 
 
-def train_batch(agent, target_network, optimizer, exp_replay, 
-                hints, batch_size, device, zero_grad=True, step=True):
+def polyak_update(polyak_factor, target_network, network):
+    for target_param, param in zip(target_network.parameters(), network.parameters()):
+        target_param.data.copy_(polyak_factor * param.data + target_param.data * (1.0 - polyak_factor))
+
+
+def train_batch(agent, target_network, optimizer, 
+                exp_replay, hints, batch_size, device, 
+                zero_grad=True, step=True, transitions=None):
     agent.train()
     if zero_grad:
         optimizer.zero_grad()
     coords, obs, n_completed, a, r, \
     next_coords, next_obs, next_n_completed, is_done = exp_replay.sample(batch_size)
+
+    if transitions is not None:
+        transitions.append(coords)
 
     loss = compute_td_loss(coords,
                            obs,
@@ -555,9 +604,10 @@ def train_batch(agent, target_network, optimizer, exp_replay,
                            hints,
                            device=device)
     loss.backward()
+    grad_norm = nn.utils.clip_grad_norm_(agent.parameters(), 5)
     if step:
         optimizer.step()
-    return loss.item()
+    return loss.item(), grad_norm
 
 @ignore_keyboard_traceback
 def train_priority(n_epochs,
@@ -586,13 +636,19 @@ def train_priority(n_epochs,
     agent.to(device)
     target_network.to(device)
 
+    env = make_env()
     loss_log = []
     reward_log = []
+    grad_norm_log = []
+    init_state_v_log = []
     best_seen_reward = min_reward_for_saving
 
     use_hints = False
     if hints is not None:
         use_hints = True
+    
+    transitions = []
+    priority_transitions = []
     
     for epoch in range(n_epochs + 1):
         agent.epsilon = epsilon.get_value(epoch)
@@ -603,16 +659,19 @@ def train_priority(n_epochs,
         # loss
         agent.train()
         batch_loss = 0
+        batch_grad_norm = 0
         for _ in range(batches_per_epoch):
-            batch_loss += train_batch(agent, target_network, optimizer, 
+            loss, grad = train_batch(agent, target_network, optimizer, 
                                       exp_replay, hints, batch_size, device, 
-                                      zero_grad=True, step=False)
-            batch_loss += train_batch(agent, target_network, optimizer, 
-                                      priority_exp_replay, hints, batch_size, device,
-                                      zero_grad=False, step=True)
-        # for _ in range(priority_batches_per_epoch):
-            
+                                      zero_grad=True, step=False, transitions=transitions)
+            batch_loss += loss
+            batch_grad_norm = max(batch_grad_norm, grad)
 
+            loss, grad = train_batch(agent, target_network, optimizer, 
+                                      priority_exp_replay, hints, batch_size, device,
+                                      zero_grad=False, step=True, transitions=priority_transitions)
+            batch_loss += loss
+            batch_grad_norm = max(batch_grad_norm, grad)
 
         if (epoch + 1) % loss_log_freq == 0:
             batch_loss /= batches_per_epoch + priority_batches_per_epoch
@@ -620,6 +679,11 @@ def train_priority(n_epochs,
                 loss_log.append(loss_clip)
             else:
                 loss_log.append(batch_loss)
+
+            initial_state_v = np.max(agent.get_qvalues(env.reset()))
+            init_state_v_log.append(initial_state_v)
+            grad_norm_log.append(batch_grad_norm)
+            
         
         if (epoch + 1) % reward_log_freq == 0:
             eps = agent.epsilon
@@ -627,16 +691,23 @@ def train_priority(n_epochs,
             reward_log.append(evaluate(1, agent, make_env(), max_steps, use_hints=use_hints))
             if best_seen_reward < reward_log[-1]:
                 best_seen_reward = reward_log[-1]
-                save_model(save_path, agent.state_dict(), epoch, best_seen_reward)
+                save_model(save_path, agent.state_dict(), epoch)
             agent.epsilon = eps
 
         if (epoch + 1) % plot_every == 0:
+            transitions = np.vstack(transitions)
+            priority_transitions = np.vstack(priority_transitions)
+
             display.clear_output()
             print(f'Epoch #{epoch}')
-            plot_progress(loss_log, reward_log)
+            plot_progress(loss_log, reward_log, init_state_v_log, grad_norm_log, 
+                          transitions, priority_transitions, env._get_field_image())
+            transitions = []
+            priority_transitions = []
 
         if (epoch + 1) % refresh_target_network_freq == 0:
-            target_network.load_state_dict(agent.state_dict())
+            polyak_update(0.5, target_network, agent)
+            # target_network.load_state_dict(agent.state_dict())
     return reward_log
 
 # ---------------------------------------------
@@ -672,4 +743,3 @@ class ExpEpsilon(Epsilon):
     def get_value(self, episode):
         return self.min_epsilon + (self.max_epsilon - self.min_epsilon
                                    ) * np.exp(-self.gamma * episode)
-

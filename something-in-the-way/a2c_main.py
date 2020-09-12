@@ -16,11 +16,11 @@ from a2c import A2CAgent, train
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Run a2c experiment')
     parser.add_argument('--env-config', help='Path to env config file')
-    parser.add_argument('--test-env-config', help='Path to test env config file. META SETUP')
+    parser.add_argument('--meta', action='store_true')
     parser.add_argument('--hint-type', help='Type of the hint')
 
     parser.add_argument('--runs', type=int, default=1, help='Number of runs of the experiment')
-    parser.add_argument('--experiment-name-prefix', default='', help='Prefix for the experiment name')
+    parser.add_argument('--experiment-prefix', default='', help='Prefix for the experiment name')
     parser.add_argument('--experiment-config', 
                         default='/home/foksly/Documents/road-to-nips/something-in-the-way/a2c/configs/default_config.json',
                         help='Experiment config')
@@ -28,11 +28,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_config(path, env):
+def get_config(path):
     with open(path, 'r') as file:
         config = json.load(file)
-    config['state']['coord_range'] = np.prod(env.field.shape)
-    config['state']['n_cols'] = env.field.shape[1]
     return config
 
 
@@ -43,14 +41,14 @@ def load_field_config(path):
 
 
 def get_experiment_name(args, add_date=True):
-    env_name = args.env_config.split('/')[-1].split('.')[0]
+    env_name = args.env_config.split('/')[-1].split('.')[0] if args.env_config else 'meta'
     hint_type = args.hint_type if args.hint_type is not None else 'no_hint'
     date = datetime.now()
     
     experiment_name = '_'.join([env_name, hint_type, str(date.day), str(date.month)])
-    if args.experiment_name_prefix:
-        experiment_name = '_'.join([args.experiment_name_prefix, experiment_name])
-    if args.test_env_config is not None:
+    if args.experiment_prefix:
+        experiment_name = '_'.join([args.experiment_prefix, experiment_name])
+    if args.meta:
         experiment_name = '_'.join(['meta', experiment_name])
     return experiment_name
 
@@ -63,20 +61,35 @@ def average_logs(logs):
     logs_avg = np.mean(logs, axis=0)
     return logs_avg
 
+
+def prepare_meta(experiment_config):
+    factories = {}
+    for t in ('train', 'test'):
+        path = experiment_config[f'{t}_configs']['path']
+        configs = sorted(os.listdir(path))
+        configs = ['/'.join([path, config]) for config in configs]
+        if 'size' in experiment_config[f'{t}_configs']:
+            configs = configs[:experiment_config[f'{t}_configs']['size']]
+        
+        configs = [load_field_config(config) for config in configs]
+        factories[t] = EnvFactory(configs)
+    return factories['train'], factories['test']
+
+
 def main():
     args = parse_args()
-
-    field_config = load_field_config(args.env_config)
-    make_env = EnvFactory(field_config)
-    env = make_env()
-
-    # test env for meta setup
-    make_test_env = None
-    if args.test_env_config is not None:
-        test_field_config = load_field_config(args.test_env_config)
-        make_test_env = EnvFactory(test_field_config)
-
-    experiment_config = get_config(args.experiment_config, env)
+    experiment_config = get_config(args.experiment_config)
+    
+    if args.meta:
+        train_factory, test_factory = prepare_meta(experiment_config)
+    else:
+        field_config = load_field_config(args.env_config)
+        train_factory = EnvFactory(field_config)
+        test_factory = None
+    
+    env = train_factory()
+    experiment_config['state']['coord_range'] = np.prod(env.field.shape)
+    experiment_config['state']['n_cols'] = env.field.shape[1]
 
     device = torch.device(experiment_config['train']['device'])
     train_params = experiment_config['train']
@@ -88,23 +101,25 @@ def main():
 
     if not os.path.exists(logdir):
         os.mkdir(logdir)
-    
+
     reward_logs = []
     test_reward_logs = []
     for _ in tqdm(range(args.runs)):
         if args.hint_type is None:
-            agent = A2CAgent(experiment_config['state'], receptive_field=env.receptive_field_size).to(device)
+            agent = A2CAgent(experiment_config['state'], n_actions=experiment_config['n_actions'],
+                             receptive_field=env.receptive_field_size).to(device)
         else:
-            agent = A2CAgent(experiment_config['state'], hint_type=args.hint_type, 
-                            hint_config=experiment_config['hint'], receptive_field=env.receptive_field_size).to(device)
+            agent = A2CAgent(experiment_config['state'], n_actions=experiment_config['n_actions'],
+                             hint_type=args.hint_type, hint_config=experiment_config['hint'], 
+                             receptive_field=env.receptive_field_size).to(device)
 
         optimizer = torch.optim.Adam(agent.parameters(), lr=experiment_config['train']['lr'])
         log = train(train_params['epochs'], 
                     train_params['n_agents'], 
-                    make_env, agent, optimizer, 
+                    train_factory, agent, optimizer, 
                     max_steps=train_params['max_steps'], 
                     hint_type=args.hint_type,
-                    make_test_env=make_test_env,
+                    test_factory=test_factory,
                     device=device,
                     experiment_name=experiment_name,
                     save_path=save_path,
@@ -112,23 +127,22 @@ def main():
                     max_reward_limit=train_params['max_reward_limit'],
                     reward_log_freq=train_params['reward_log_freq'], 
                     plot_every=1)
-        if make_test_env is not None:
+        if test_factory is not None:
             train_log, test_log = log
             reward_logs.append(train_log)
             test_reward_logs.append(test_log)
         else:
             reward_logs.append(log)
-        
-    
-    logs_avg = average_logs(reward_logs) if args.runs > 1 else reward_logs
-    if make_test_env is not None:
-        test_logs_avg = average_logs(test_reward_logs) if args.runs > 1 else test_reward_logs
+
+    logs_avg = average_logs(reward_logs) if args.runs > 1 else reward_logs[0]
+    if test_factory is not None:
+        test_logs_avg = average_logs(test_reward_logs) if args.runs > 1 else test_reward_logs[0]
     
     writer = SummaryWriter(log_dir=logdir, filename_suffix=experiment_name)
-    log_name = 'Reward' if make_test_env is None else 'META/Train reward'
+    log_name = 'Reward' if test_factory is None else 'META/Train reward'
     for i, reward in enumerate(logs_avg):
         writer.add_scalar(log_name, reward, i)
-    if make_test_env is not None:
+    if test_factory is not None:
         for i, reward in enumerate(test_logs_avg):
             writer.add_scalar('META/Test reward', reward, i)
         

@@ -18,7 +18,7 @@ class Reward:
         self.reward_config = deepcopy(field_config['reward'])
         self.completed_bridges = 0
         self.seen_states = set()
-    
+
     def reset(self):
         self.completed_bridges = 0
         self.seen_states = set()
@@ -98,29 +98,26 @@ class Environment:
                 
     def get_hint(self, state, hint_type):
         # self.action2index = {'U': 0, 'D': 1, 'R': 2}
-        if hint_type == 'next_direction':
+        if hint_type.startswith('next_direction'):
             if state.n_completed < len(self.hints):
                 for hint in self.hints[state.n_completed]:
                     if (hint[0], hint[1]) == state.coord:
-                        return self.action2index[hint[2]]
+                        correct_action = hint[2]
+                        return self.action2index[correct_action]
+                if hint_type == 'next_direction_on_bridge':
+                    no_hint_token = 3
+                    return no_hint_token
+
                 target_x = self.hints[state.n_completed][0][0]
             else:
                 target_x = self.goal_position.x
-            
+
             if state.coord.x == target_x:
                 return self.action2index['R']
             elif state.coord.x < target_x:
                 return self.action2index['D']
             else:
                 return self.action2index['U']
-
-        if hint_type == 'next_direction_on_bridge':
-            no_hint_token = 3
-            for hint in self.hints[state.n_completed]:
-                if (hint[0], hint[1]) == state.coord:
-                    return self.action2index[hint[2]]
-            return no_hint_token
-            
 
 
     def get_static_hint(self):
@@ -210,8 +207,17 @@ class Environment:
 
 
 class EnvFactory:
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, configs, eps=1e-1):
+        self.configs = configs if isinstance(configs, list) else [configs]
+        self.id = 0
+        
+        self._max_reward = sum(self.configs[0]['reward'].values()) - eps
     
     def __call__(self):
-        return Environment(self.config, add_agent_value=False)
+        return Environment(self.configs[self.id], add_agent_value=False)
+    
+    def switch(self):
+        self.id = np.random.randint(len(self.configs))
+    
+    def get_max_reward(self):
+        return self._max_reward

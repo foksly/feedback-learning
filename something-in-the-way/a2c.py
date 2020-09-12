@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
-from encoders import StateEncoder, HintEncoder
+from embedders import StateEncoder, HintEncoder
 from utils import ignore_keyboard_traceback, save_model
 
 import matplotlib.pyplot as plt
@@ -25,10 +25,12 @@ class A2CAgent(nn.Module):
         self.n_actions = n_actions
         self.hint_type = hint_type
 
-        self.state_encoder = StateEncoder(state_config, receptive_field=receptive_field)
+        self.state_encoder = StateEncoder(state_config,
+                                          receptive_field=receptive_field)
         hint_dim = 0
         if hint_type is not None:
-            self.hint_encoder = HintEncoder(hint_type, hint_config)  # code hint type
+            self.hint_encoder = HintEncoder(hint_type,
+                                            hint_config)  # code hint type
             hint_dim = self.hint_encoder.hint_dim
 
         self.backbone = nn.Sequential(
@@ -71,7 +73,8 @@ class A2CAgent(nn.Module):
         if isinstance(state, list):
             coord, obs, n_completed = state.coord, state.obs, state.n_completed
         else:
-            coord, obs, n_completed = [state.coord], [state.obs], [state.n_completed]
+            coord, obs, n_completed = [state.coord], [state.obs
+                                                      ], [state.n_completed]
 
         coord_t = torch.as_tensor(coord, device=device)
         obs_t = torch.as_tensor(obs, dtype=torch.long, device=device)
@@ -111,7 +114,7 @@ def get_trajectories(n_agents, agent, make_env, max_steps=100, hint_type=None):
                 next_s, r, done = envs[i].step(actions[idx])
                 trajs[i].append([states[i], actions[idx], r, next_s, done])
                 if hint_type is not None:
-                    hint = env.get_hint(states[i], hint_type='next_direction')
+                    hint = env.get_hint(states[i], hint_type=hint_type)
                     trajs[i][-1].append(hint)
 
                 states[i] = next_s
@@ -139,8 +142,7 @@ def compute_trajectory_loss(trajectory,
     # states, actions, rewards, _, _ = map(list, zip(*trajectory))
     states, actions, rewards = data[:3]
     hints = data[-1] if hint_type is not None else None
-        
-        
+
     actions = torch.as_tensor(actions, device=device, dtype=torch.long)
     rewards = torch.as_tensor(rewards, device=device, dtype=torch.float)
 
@@ -180,11 +182,13 @@ def compute_loss(trajectories,
     loss = None
     for trajectory in trajectories:
         if loss is None:
-            loss = compute_trajectory_loss(trajectory, agent, env, hint_type, 
-                                           gamma, entropy_term_strength, device)
+            loss = compute_trajectory_loss(trajectory, agent, env, hint_type,
+                                           gamma, entropy_term_strength,
+                                           device)
         else:
-            loss += compute_trajectory_loss(trajectory, agent, env, hint_type, 
-                                            gamma, entropy_term_strength, device)
+            loss += compute_trajectory_loss(trajectory, agent, env, hint_type,
+                                            gamma, entropy_term_strength,
+                                            device)
     return loss / len(trajectories)
 
 
@@ -214,12 +218,12 @@ def compute_mean_reward(trajectories):
 @ignore_keyboard_traceback
 def train(n_epochs,
           n_agents,
-          make_env,
+          train_factory,
           agent,
           optimizer,
           max_steps=50,
           hint_type=None,
-          make_test_env=None,
+          test_factory=None,
           device=torch.device('cuda'),
           experiment_name=None,
           save_path=None,
@@ -230,31 +234,29 @@ def train(n_epochs,
           print_progress=True,
           plot_progress=False,
           plot_every=100):
-    
-    env = make_env()
-    # field_img = env.render()
-    # field_img = field_img.reshape((1, *field_img.shape))
-    # field_img = np.transpose(field_img, (0, 3, 1, 2))
-
     agent.to(device)
-    env = make_env()
     loss_log = []
     reward_log = []
     max_reward_hits = 0
-    max_reward = sum(env.reward.reward_config.values()) - 1e-2
-    if make_test_env is not None:
+    max_reward = train_factory.get_max_reward()
+    if test_factory is not None:
         test_reward_log = []
 
     for epoch in range(1, n_epochs):
+        train_factory.switch()
         trajectories = get_trajectories(n_agents,
                                         agent,
-                                        make_env,
+                                        train_factory,
                                         max_steps=max_steps,
                                         hint_type=hint_type)
 
         agent.train()
         optimizer.zero_grad()
-        loss = compute_loss(trajectories, agent, env, hint_type=hint_type, device=device)
+        loss = compute_loss(trajectories,
+                            agent,
+                            train_factory(),
+                            hint_type=hint_type,
+                            device=device)
         loss_log.append(loss.item())
 
         loss.backward()
@@ -267,32 +269,37 @@ def train(n_epochs,
             mean_reward = compute_mean_reward(trajectories)
             reward_log.append(mean_reward)
 
-            if make_test_env is not None:
-                test_trajectories = get_trajectories(n_agents,
-                                        agent,
-                                        make_test_env,
-                                        max_steps=max_steps,
-                                        hint_type=hint_type)
-                test_mean_reward = compute_mean_reward(test_trajectories)
-                test_reward_log.append(test_mean_reward)
+            if test_factory is not None:
+                test_mean_rewards = []
+                for i in range(len(test_factory.configs)):
+                    test_factory.id = i
+                    test_trajectories = get_trajectories(n_agents,
+                                                         agent,
+                                                         test_factory,
+                                                         max_steps=max_steps,
+                                                         hint_type=hint_type)
+                    mean_reward = compute_mean_reward(test_trajectories)
+                    test_mean_rewards.append(mean_reward)
+                total_mean_reward = np.mean(test_mean_rewards)
+                test_reward_log.append(total_mean_reward)
 
             if print_progress:
                 print(f'\nEpoch #{epoch}')
                 print(f'Mean reward...{mean_reward} \n')
-            
+                print()
+
             if mean_reward > max_reward:
                 max_reward_hits += 1
 
             if max_reward_hits == max_reward_limit:
                 break
-            
 
         if plot_progress and epoch % plot_every == 0:
             display.clear_output()
             print(f'Epoch #{epoch + 1}')
             plot_progress(loss_log, reward_log)
-    
-    if make_test_env is None:
+
+    if test_factory is None:
         return reward_log
 
     return reward_log, test_reward_log
